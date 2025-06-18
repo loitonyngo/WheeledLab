@@ -129,8 +129,7 @@ class TraversabilityHashmapUtil:
         unique_map_levels = torch.unique(map_levels)
         for map_level in unique_map_levels:
             mask = (map_levels == map_level)
-            if not mask.any():
-                continue
+
                 
             # Get map-specific parameters
             origin = self.origin_list[map_level]

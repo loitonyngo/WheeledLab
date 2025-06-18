@@ -1,6 +1,7 @@
 import functools
 from typing import Dict
 from collections.abc import Callable
+import time
 
 from typing import Any
 
@@ -28,7 +29,6 @@ def _consolidate_resolved_cfgs(run_cfg: RunConfig):
     ####### MODIFY CONFIGS USING EXPOSED OVERRIDES ####### TODO: anyway to resolve these better?
     run_cfg.env.scene.num_envs = run_cfg.env_setup.num_envs
     run_cfg.env.scene.env_spacing = run_cfg.env_setup.env_spacing
-    run_cfg.env.map_name = run_cfg.env_setup.map_name
 
     run_cfg.env.seed = run_cfg.agent.seed
     run_cfg.env.sim.device = run_cfg.train.device
@@ -46,6 +46,7 @@ def rl_run_cfg_from_dict(run_cfg:DictConfig, run_config_name: str, cfg: Dict[str
     to recover @property values from composed configs
     TODO: implement for arbitrary configclasses
     '''
+    tic = time.time()
 
     # Fill default run config with train, env, and agent of loaded config
     update_run_cfg: RunConfig = getattr(configs, run_config_name)() # default run config from module
@@ -66,38 +67,100 @@ def rl_run_cfg_from_dict(run_cfg:DictConfig, run_config_name: str, cfg: Dict[str
         update_run_cfg.agent.from_dict(cfg['agent'])
     else:
         update_run_cfg.agent = cfg['agent']
+    rl_run_cfg_from_dict_time = time.time() - tic
+
+    print(f" rl_run_cfg_from_dict: {rl_run_cfg_from_dict_time:.4f} ")
 
     return update_run_cfg
 
 
+
 def register_run_to_hydra(run_config_name: str, node: Any):
     """Load the configurations from the registry and update the Hydra configuration store."""
+    # Initialize timers
+    timers = {
+        'total': time.time(),
+        'store_initial_config': 0,
+        'load_run_config': 0,
+        'load_env_config': 0,
+        'load_agent_config': 0,
+        'replace_spaces': 0,
+        'convert_to_dict': 0,
+        'replace_slices_env': 0,
+        'replace_slices_agent': 0,
+        'store_final_config': 0
+    }
+    
     # register the task to Hydra
+    tic = time.time()
     cs.store(name=run_config_name, node=node)
+    timers['store_initial_config'] = time.time() - tic
 
+    # load run configuration
+    tic = time.time()
     run_cfg = cs.repo.get(run_config_name + ".yaml").node
     task_name = run_cfg.env_setup.task_name
     agent_cfg_entry_point = run_cfg.agent_setup.entry_point
+    timers['load_run_config'] = time.time() - tic
 
+    # load environment and agent configs
+    tic = time.time()
     env_cfg = load_cfg_from_registry(task_name, "env_cfg_entry_point")
+    timers['load_env_config'] = time.time() - tic
+    
+    tic = time.time()
     agent_cfg = load_cfg_from_registry(task_name, agent_cfg_entry_point)
+    timers['load_agent_config'] = time.time() - tic
 
-    # replace gymnasium spaces with strings because OmegaConf does not support them.
-    # this must be done before converting the env configs to dictionary to avoid internal reinterpretations
+    # replace gymnasium spaces with strings
+    tic = time.time()
     replace_env_cfg_spaces_with_strings(env_cfg)
-    # convert the configs to dictionary
+    timers['replace_spaces'] = time.time() - tic
+
+    # convert configs to dictionary
+    tic = time.time()
     env_cfg_dict = env_cfg.to_dict()
     if isinstance(agent_cfg, dict):
         agent_cfg_dict = agent_cfg
     else:
         agent_cfg_dict = agent_cfg.to_dict()
+    timers['convert_to_dict'] = time.time() - tic
 
+    # replace slices with strings
+    tic = time.time()
     env_cfg_dict = replace_slices_with_strings(env_cfg_dict)
+    timers['replace_slices_env'] = time.time() - tic
+    
+    tic = time.time()
     agent_cfg_dict = replace_slices_with_strings(agent_cfg_dict)
+    timers['replace_slices_agent'] = time.time() - tic
 
+    # store final configuration
+    tic = time.time()
     run_cfg.env = env_cfg_dict
     run_cfg.agent = agent_cfg_dict
+    timers['copy_cfg_dict'] = time.time() - tic
+
+    tic = time.time()
     cs.store(name=run_config_name, node=run_cfg)
+    timers['store_final_config'] = time.time() - tic
+
+    # Calculate total time
+    timers['total'] = time.time() - timers['total']
+
+    # Print timing results
+    print("\n Register Run to Hydra Configuration Registration Time Breakdown:")
+    print(f"Total time: {timers['total']:.4f} seconds")
+    print(f"  cs.store(name=run_config_name, node=node) : {timers['store_initial_config']:.4f} ")
+    print(f"  Load run config: {timers['load_run_config']:.4f}")
+    print(f"  env_cfg = load_cfg_from_registry: {timers['load_env_config']:.4f} ")
+    print(f"  agent_cfg = load_cfg_from_registry: {timers['load_agent_config']:.4f}")
+    print(f"  replace_env_cfg_spaces_with_strings(env_cfg): {timers['replace_spaces']:.4f} ")
+    print(f"  env_cfg_dict = env_cfg.to_dict(): {timers['convert_to_dict']:.4f} ")
+    print(f"  env_cfg_dict = replace_slices_with_strings: {timers['replace_slices_env']:.4f}")
+    print(f"  agent_cfg_dict = replace_slices_with_strings: {timers['replace_slices_agent']:.4f}")
+    print(f"  run_cfg.env = env_cfg_dict/agent_cfg_dict: {timers['copy_cfg_dict']:.4f} ")
+    print(f"  cs.store(name=run_config_name, node=run_cfg): {timers['store_final_config']:.4f} ")
 
     return env_cfg, agent_cfg
 
@@ -121,49 +184,88 @@ def hydra_run_config(run_config_name:str, auto_resolve_conflicts=True) -> Callab
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             # env_cfg, agent_cfg = register_run_to_hydra(run_config_name, node)
-
+                
+            tic = time.time()
             # Load configs from registries using run config name
             run_cfg = cs.repo.get(run_config_name + ".yaml").node
             if run_cfg is None:
                 raise ValueError(f"Run config {run_config_name} not found in the Hydra registry.")
-
+            run_cfg_time = time.time() - tic
+            
+            tic = time.time()
             task_name = run_cfg.env_setup.task_name
+            task_name_time = time.time() - tic
+
+            tic = time.time()
             env_cfg = load_cfg_from_registry(task_name, "env_cfg_entry_point")
+            env_load_cfg_from_registry_time = time.time() - tic
+
+            tic = time.time()
             agent_cfg = load_cfg_from_registry(task_name, run_cfg.agent_setup.entry_point)
+            agent_load_cfg_from_registry_time = time.time() - tic
+
+            print("\n[INFO]: Wrapper Configuration Registration Time Breakdown:")
+
+            print(f" run_cfg = cs.repo.get().node : {run_cfg_time:.4f}")
+            print(f" task_name = run_cfg.env_setup.task_name : {task_name_time:.4f}")
+            print(f" env_cfg = load_cfg_from_registry : {env_load_cfg_from_registry_time:.4f}")
+            print(f" agent_cfg = load_cfg_from_registry : {agent_load_cfg_from_registry_time:.4f}")
 
             # define the new Hydra main function
             @hydra.main(config_name=run_config_name, version_base="1.3")
             def hydra_main(hydra_env_cfg: DictConfig, env_cfg=env_cfg, agent_cfg=agent_cfg,
                            run_cfg=run_cfg, run_config_name: str=run_config_name):
 
+                tic = time.time()
                 # convert to a native dictionary
                 hydra_env_cfg = OmegaConf.to_container(hydra_env_cfg, resolve=True)
+                to_container_time = time.time() - tic
 
+                tic = time.time()
                 # replace string with slices because OmegaConf does not support slices
                 hydra_env_cfg = replace_strings_with_slices(hydra_env_cfg)
+                replace_strings_slices_time = time.time() - tic
 
+                tic = time.time()
                 # update the configs with the Hydra command line arguments
                 env_cfg.from_dict(hydra_env_cfg["env"])
+                from_dict_time = time.time() - tic
 
+                tic = time.time()
                 # replace strings that represent gymnasium spaces because OmegaConf does not support them.
                 # this must be done after converting the env configs from dictionary to avoid internal reinterpretations
                 replace_strings_with_env_cfg_spaces(env_cfg)
+                replace_strings_spaces_time = time.time() - tic
 
+                tic = time.time()   
                 # call the original function
                 # run_cfg = node()
                 # run_cfg._from_dict(hydra_env_cfg, env_cfg_class=env_cfg.__class__,
                 #                    agent_cfg_class=agent_cfg.__class__)
                 run_cfg = rl_run_cfg_from_dict(run_cfg, run_config_name, hydra_env_cfg, env_cfg_class=env_cfg.__class__,
                                           agent_cfg_class=agent_cfg.__class__)
+                rl_from_dict_time = time.time() - tic
 
+                tic = time.time()   
                 # Resolve interdependencies between various config params (e.g. env.num_envs = env_setup.num_envs)
                 if auto_resolve_conflicts:
                     _consolidate_resolved_cfgs(run_cfg)
 
                 func(run_cfg, *args, **kwargs)
+                resolve_time = time.time() - tic
+
+                print(f" hydra_env_cfg = OmegaConf.to_container : {to_container_time:.4f}")
+                print(f" hydra_env_cfg = replace_strings_with_slices : {replace_strings_slices_time:.4f}")
+                print(f" env_cfg.from_dict() : {from_dict_time:.4f}")
+                print(f" replace_strings_with_env_cfg_spaces(env_cfg) : {replace_strings_spaces_time:.4f}")
+                print(f" run_cfg = rl_run_cfg_from_dict : {rl_from_dict_time:.4f}")
+                print(f" if auto_resolve_conflicts : {resolve_time:.4f}")
 
             # call the new Hydra main function
+            tic = time.time()
             hydra_main()
+            hydra_time = time.time()-tic
+            print(f" hydra_main() : {hydra_time:.4f}")
 
         return wrapper
 

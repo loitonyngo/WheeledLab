@@ -66,7 +66,7 @@ def get_min_map_size(outer, resolution):
     
     return min_map_size
 
-def create_square_drivable_map_v2(min_map_size, outer, inner, resolution=0.5):
+def create_square_drivable_map_v2(min_map_size, outer, inner, resolution=0.2):
     """Create square boolean hashmap of drivable areas."""
     # Create grid that fully contains outer boundary
     x_min, y_min = np.min(outer, axis=0)
@@ -190,54 +190,91 @@ def set_stage_usd(file_path):
     #     print('[INFO]: Opening existing map')
     # except:
     stage = Usd.Stage.CreateNew(file_path)
-    print('[INFO]: Creating new map')
+    print('[INFO]: Setting USD Stage')
     UsdGeom.SetStageMetersPerUnit(stage, UsdGeom.LinearUnits.meters)
     UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
     xform = UsdGeom.Xform.Define(stage, '/World')
     stage.SetDefaultPrim(xform.GetPrim())
     return stage
 
-def set_hashmap_usd(map_name, hashmap, origin, map_size_pixels, map_size_meters, stage, x_min, x_max, y_min, y_max, resolution):
-    plane = UsdGeom.Mesh.Define(stage, '/World/'+ map_name+'/hashmap')
-    # Create vertices 
-    xs = np.linspace(
-        -map_size_meters[1]/2 + origin[0],
-        map_size_meters[1]/2 + origin[0],
-        map_size_pixels[1]
-    )
-    ys = np.linspace(
-        -map_size_meters[0]/2 + origin[1],
-        map_size_meters[0]/2 + origin[1],
-        map_size_pixels[0]
-    )
-    xx, yy = np.meshgrid(xs, ys)
+# def set_hashmap_usd(map_name, hashmap, origin, map_size_pixels, map_size_meters, stage, x_min, x_max, y_min, y_max, resolution):
+#     plane = UsdGeom.Mesh.Define(stage, '/World/'+ map_name+'/hashmap')
+#     # Create vertices 
+#     xs = np.linspace(
+#         -map_size_meters[1]/2 + origin[0],
+#         map_size_meters[1]/2 + origin[0],
+#         map_size_pixels[1]
+#     )
+#     ys = np.linspace(
+#         -map_size_meters[0]/2 + origin[1],
+#         map_size_meters[0]/2 + origin[1],
+#         map_size_pixels[0]
+#     )
+#     xx, yy = np.meshgrid(xs, ys)
 
-    vertices = [(x, y, 0) for x, y in zip(xx.ravel(), yy.ravel())]
-    # Create faces (same as your original code)
+#     vertices = [(x, y, 0) for x, y in zip(xx.ravel(), yy.ravel())]
+#     # Create faces (same as your original code)
+#     faces = []
+#     face_counts = []
+#     for row in range(map_size_pixels[0] - 1):
+#         for col in range(map_size_pixels[1] - 1):
+#             v0 = row * map_size_pixels[1] + col
+#             v1 = v0 + 1
+#             v2 = v0 + map_size_pixels[1]
+#             v3 = v2 + 1
+#             faces += [v0, v1, v2, v2, v1, v3]
+#             face_counts += [3, 3]
+#     # Assign colors (white=drivable, black=obstacle)
+#     colors = [Gf.Vec3f(0, 0, 0), Gf.Vec3f(1, 1, 1)]  # Black, White
+#     face_colors = []
+#     for row in range(map_size_pixels[0] - 1):
+#         for col in range(map_size_pixels[1] - 1):
+#             face_colors.append(colors[int(hashmap[row, col])])
+    
+#     # Double colors for triangles
+#     face_colors_triangle = [c for color_pair in zip(face_colors, face_colors) for c in color_pair]
+#     # Set mesh attributes
+#     plane.GetPointsAttr().Set(vertices)
+#     plane.GetFaceVertexCountsAttr().Set(face_counts)
+#     plane.GetFaceVertexIndicesAttr().Set(faces)
+#     plane.CreateDisplayColorPrimvar(UsdGeom.Tokens.uniform).Set(face_colors_triangle)
+
+def set_hashmap_usd(map_name, hashmap, origin, map_size_pixels, map_size_meters, stage, x_min, x_max, y_min, y_max, resolution):
+    plane = UsdGeom.Mesh.Define(stage, '/World/' + map_name + '/hashmap')
+    
+    # Vectorized vertex creation
+    xs = np.linspace(-map_size_meters[1]/2 + origin[0], map_size_meters[1]/2 + origin[0], map_size_pixels[1])
+    ys = np.linspace(-map_size_meters[0]/2 + origin[1], map_size_meters[0]/2 + origin[1], map_size_pixels[0])
+    xx, yy = np.meshgrid(xs, ys)
+    vertices = np.stack([xx.ravel(), yy.ravel(), np.zeros_like(xx.ravel())], axis=1).tolist()
+
+    # Face construction (same as before)
     faces = []
     face_counts = []
+    width = map_size_pixels[1]
     for row in range(map_size_pixels[0] - 1):
-        for col in range(map_size_pixels[1] - 1):
-            v0 = row * map_size_pixels[1] + col
+        for col in range(width - 1):
+            v0 = row * width + col
             v1 = v0 + 1
-            v2 = v0 + map_size_pixels[1]
+            v2 = v0 + width
             v3 = v2 + 1
             faces += [v0, v1, v2, v2, v1, v3]
             face_counts += [3, 3]
-    # Assign colors (white=drivable, black=obstacle)
-    colors = [Gf.Vec3f(0, 0, 0), Gf.Vec3f(1, 1, 1)]  # Black, White
-    face_colors = []
-    for row in range(map_size_pixels[0] - 1):
-        for col in range(map_size_pixels[1] - 1):
-            face_colors.append(colors[int(hashmap[row, col])])
-    
-    # Double colors for triangles
-    face_colors_triangle = [c for color_pair in zip(face_colors, face_colors) for c in color_pair]
-    # Set mesh attributes
+
+    # Optimized face color mapping
+    flat_hashmap = hashmap[:-1, :-1].ravel().astype(int)
+    color_array = np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]], dtype=np.float32)
+    face_colors_np = color_array[flat_hashmap]
+    face_colors_triangle = np.repeat(face_colors_np, 2, axis=0)
+    # Convert face colors to USD Gf.Vec3f list (fixed)
+    face_colors_triangle = [Gf.Vec3f(*map(float, c)) for c in face_colors_triangle]
+
+    # Set USD attributes
     plane.GetPointsAttr().Set(vertices)
     plane.GetFaceVertexCountsAttr().Set(face_counts)
     plane.GetFaceVertexIndicesAttr().Set(faces)
     plane.CreateDisplayColorPrimvar(UsdGeom.Tokens.uniform).Set(face_colors_triangle)
+
 
 # def set_multiple_planes_usd(hashmap_list, map_size_pixels_list, 
 #                           map_size_meters_list, stage, x_min_list, x_max_list, 
