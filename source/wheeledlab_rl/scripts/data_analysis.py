@@ -19,7 +19,8 @@ from matplotlib.lines import Line2D
 
 # ]
 POLICY_LIST = [
-    'efficient-bee-970'
+    'deft-dawn-993',
+    'lilac-spaceship-994'
 ]
 # Color cycle for different policies
 COLORS = plt.rcParams['axes.prop_cycle'].by_key()['color']

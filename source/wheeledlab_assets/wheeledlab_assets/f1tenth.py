@@ -13,16 +13,17 @@ F1TENTH_4WD_ACTUATOR_CFG = {
         effort_limit=2.5,
         stiffness=120.0,
         damping=8.0,
-        friction=0.0,
+        friction=0.01,
     ),
     "throttle_joints": DCMotorCfg(
         joint_names_expr=[".*wheel_(back|front)_.*"],  # Matches all throttle joints (e.g. wheel_back_left, wheel_front_right, etc.)
         saturation_effort=1.0,
         effort_limit=0.25,   # Adjusted for the 3s VXL-3s motor/ESC
         velocity_limit=400.0,  # Reduced speed compared to a 4s system
-        stiffness=0,
-        damping=1100.0,
-        friction=0.0,
+        stiffness=10,
+        # damping=1100.0,
+        damping=100.0,
+        friction=0.01,
     ),
 }
 
@@ -43,7 +44,7 @@ _ZERO_INIT_STATES = ArticulationCfg.InitialStateCfg(
 # Overall configuration tying together the asset, physics, and initial state.
 F1TENTH_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{WHEELEDLAB_ASSETS_DATA_DIR}/Robots/F1TENTH/f1tenth.usd",
+        usd_path=f"{WHEELEDLAB_ASSETS_DATA_DIR}/Robots/F1TENTH/f1tenth_mod.usd",
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             rigid_body_enabled=True,
             max_linear_velocity=1000.0,
@@ -99,7 +100,8 @@ LB_CFG = ArticulationCfg(
             effort_limit=40000.0,
             velocity_limit=100.0,
             stiffness=0.0,
-            damping=100000.0,
+            # damping=100000.0,
+            damping=100.0,
         ),
         "steering": ImplicitActuatorCfg(
             joint_names_expr=["Knuckle__Upright__Front.*"],

@@ -8,7 +8,7 @@ from wheeledlab_rl.configs import (
 class RSS_TEST(RslRlRunConfig):
     env_setup = EnvSetup(
         num_envs=64,
-        env_spacing= 25,
+        env_spacing= 50,
         task_name="Isaac-F1TenthTimeTrialRL-v0"
     )
     # unique-jazz-683

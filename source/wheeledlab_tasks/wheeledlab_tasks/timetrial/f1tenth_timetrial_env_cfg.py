@@ -41,9 +41,19 @@ from .disable_lidar import disable_all_lidars
 
 from .utils import create_maps_from_waypoints, generate_random_poses, generate_random_poses_from_list, generate_start_idx_poses_from_list, TraversabilityHashmapUtil, find_nearest_waypoint 
 from . import mdp_sensors
-from .mdp import reset_root_state, reset_root_state_start_idx
+from .mdp import reset_root_state_random, reset_root_state_start_idx
 
 import omni.usd
+
+import yaml  # Add this import at the top of your file
+from pathlib import Path
+from typing import List  # For type hints
+# Get the script's directory (/path/myscript/)
+script_dir = Path(__file__).parent
+# Navigate to the config file (go up one level, then into "config")
+config_path = script_dir / "config" / "f1tenth_timetrial_config.yaml"
+with open(config_path, "r") as f:
+    CONFIG = yaml.safe_load(f)
 
 
 ##############################
@@ -73,6 +83,83 @@ def base_ang_vel_z(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntity
     noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
 
     return asset.data.root_ang_vel_b[:,2].unsqueeze(-1) + noise
+
+def wheel_slip(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
+    # extract the used quantities (to enable type-hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    noise = torch.empty(size=asset.data.root_lin_vel_b[:,0].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
+    
+    lin_vel_w = asset.data.body_com_lin_vel_w.squeeze(1)
+    ang_vel_w =asset.data.body_com_ang_vel_w.squeeze(1)
+    quat_w = asset.data.body_link_quat_w.squeeze(1)
+
+    # TO DO USE WHEELS INDEXES 1,3,5,6
+    wheels_lin_vel_body_frame = quat_rotate_inverse(quat_w, lin_vel_w)[:, [1, 3, 5, 6]] # (num_instances, 3)
+    wheels_ang_vel_body_frame = quat_rotate_inverse(quat_w, ang_vel_w)[:, [1, 3, 5, 6]] # (num_instances, 3)
+    lin_vel_root=asset.data.root_lin_vel_b
+    
+    # TO DO CHANGE TO IMPLEMENT WHEEL SLIP OBS
+    return wheels_ang_vel_body_frame[:, :, 1]
+
+def wheel_slip_2(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
+    # extract the used quantities (to enable type-hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    noise = torch.empty(size=asset.data.root_lin_vel_b[:,0].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
+    
+    lin_vel_w = asset.data.body_com_lin_vel_w.squeeze(1)
+    ang_vel_w =asset.data.body_com_ang_vel_w.squeeze(1)
+    quat_w = asset.data.body_link_quat_w.squeeze(1)
+    
+    # Get base frame orientation (assuming index 0 is the base)
+    base_quat = quat_w[:, 0:1]  # (num_instances, 1, 4)
+
+    # TO DO USE WHEELS INDEXES 1,3,5,6
+    wheels_lin_vel_body_frame = quat_rotate_inverse(base_quat, lin_vel_w)[:, [1, 3, 5, 6]] # (num_instances, 3)
+    wheels_ang_vel_body_frame = quat_rotate_inverse(base_quat, ang_vel_w)[:, [1, 3, 5, 6]] # (num_instances, 3)
+    lin_vel_root=asset.data.root_lin_vel_b
+
+    
+    # TO DO CHANGE TO IMPLEMENT WHEEL SLIP OBS
+    return wheels_lin_vel_body_frame[:, :, 0]
+
+def wheel_slip_3(
+    env: ManagerBasedEnv, 
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), 
+    mean_noise: float = 0, 
+    std_noise: float = 0
+) -> torch.Tensor:
+    # Extract the used quantities (to enable type-hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    
+    # Generate noise (if needed)
+    noise = torch.empty(
+        size=asset.data.root_lin_vel_b[:, 0].unsqueeze(-1).shape, 
+        device=env.device
+    ).normal_(mean=mean_noise, std=std_noise)
+    
+    # Get body velocities and orientation
+    lin_vel_w = asset.data.body_com_lin_vel_w.squeeze(1)  # (num_instances, 3)
+    ang_vel_w = asset.data.body_com_ang_vel_w.squeeze(1)   # (num_instances, 3)
+    quat_w = asset.data.body_link_quat_w.squeeze(1)        # (num_instances, 4)
+    
+    # Rotate velocities to body frame (select wheels 1, 3, 5, 6)
+    wheels_ang_vel_body_frame = quat_rotate_inverse(quat_w, ang_vel_w)[:, [1, 3, 5, 6]]  # (num_instances, 4, 3)
+    
+    # Compute the norm (magnitude) of each wheel's angular velocity
+    wheels_ang_vel_norm = torch.norm(wheels_ang_vel_body_frame, dim=2)  # (num_instances, 4)
+    
+    return wheels_ang_vel_norm
+
+def quat_rotate(q, v):
+    # q shape: (..., 4), v shape: (..., 3)
+    q_vec = q[..., 1:]  # (x, y, z)
+    uv = torch.cross(q_vec, v, dim=-1)
+    uuv = torch.cross(q_vec, uv, dim=-1)
+    return v + 2 * (q[..., 0:1] * uv + uuv)
+
+def quat_rotate_inverse(q, v):
+    q_inv = torch.cat([q[..., 0:1], -q[..., 1:]], dim=-1)  # Inverse = conjugate for unit quat
+    return quat_rotate(q_inv, v)
 
 def deviation_centerline_horizon(
     env: ManagerBasedEnv, 
@@ -472,6 +559,24 @@ class F1TenthTimeTrialObsCfg:
             noise=Unoise(n_min=-.0, n_max=.0, operation='add')
         )
 
+        wheel_slip = ObsTerm(
+            func=wheel_slip,
+            params={'mean_noise': 0,
+                    'std_noise': 0}      
+            )
+
+        wheel_slip_2 = ObsTerm(
+            func=wheel_slip_2,
+            params={'mean_noise': 0,
+                    'std_noise': 0}      
+            )
+        
+        wheel_slip_3 = ObsTerm(
+            func=wheel_slip_3,
+            params={'mean_noise': 0,
+                    'std_noise': 0}      
+            )
+                
         heading_error = ObsTerm(
             func=heading_error_horizon,
             params={'lookahead': LOOKAHEAD,
@@ -512,6 +617,8 @@ class InitialPoseCfg:
 ##############################
 ###### TERRAIN / TRACK #######
 ##############################
+DYNAMIC_FRICTION = CONFIG['env_config']['DYNAMIC_FRICTION']
+STATIC_FRICTION = CONFIG['env_config']['STATIC_FRICTION']
 
 @configclass
 class F1TenthTimeTrialTerrainImporterCfg(TerrainImporterCfg):
@@ -545,10 +652,10 @@ class F1TenthTimeTrialTerrainImporterCfg(TerrainImporterCfg):
     physics_material = sim_utils.RigidBodyMaterialCfg(
         friction_combine_mode="multiply",
         restitution_combine_mode="multiply",
-        static_friction=1.0,
-        dynamic_friction=1.0,
+        static_friction=STATIC_FRICTION,
+        dynamic_friction=DYNAMIC_FRICTION,
     )
-    debug_vis = False
+    debug_vis = True
     
     def generate_random_poses(self, env : ManagerBasedEnv, env_ids, num_poses):
         
@@ -578,6 +685,7 @@ class F1TenthTimeTrialTerrainImporterCfg(TerrainImporterCfg):
             InitialPoseCfg(
                 pos=(x, y, 0.02),
                 rot_euler_xyz_deg=(0., 0., angle)
+                # rot_euler_xyz_deg=(0., 0., 0)
             ) for x, y, angle in init_poses
         ]
         return valid_init_poses, init_current_wps_idx
@@ -606,20 +714,18 @@ class F1TenthTimeTrialTerrainImporterCfg(TerrainImporterCfg):
 @configclass
 class F1TenthTimeTrialSceneCfg(InteractiveSceneCfg):
     """Configuration for a Mushr car Scene with racetrack terrain and Sensors."""
-    # 
+
     terrain = None
-    terrain_1 = None
-
-
+    MAP_NAME_LIST = None
     ground = AssetBaseCfg(
         prim_path="/World/base",
         spawn = sim_utils.GroundPlaneCfg(size=(1000, 1000),
                                          color=(0,0,0),
                                          physics_material=sim_utils.RigidBodyMaterialCfg(
-                                            friction_combine_mode="multiply",
+                                            friction_combine_mode="average",
                                             restitution_combine_mode="multiply",
-                                            static_friction=1.0,
-                                            dynamic_friction=1.0,
+                                            static_friction=STATIC_FRICTION,
+                                            dynamic_friction=DYNAMIC_FRICTION,
                                          ),
         )
     )
@@ -669,14 +775,18 @@ def store_data(
 
 @configclass
 class F1TenthTimeTrialEventsCfg:
+    
     # on startup
-
-    reset_root_state = EventTerm(
-        # func=reset_root_state
-        func=reset_root_state_start_idx,
-        mode="reset",
-    )
-
+    if CONFIG['env_config']['RESET_RANDOM']:
+        reset_root_state_random = EventTerm(
+            func=reset_root_state_random,
+            mode="reset",
+        )
+    else:
+        reset_root_state_start_idx = EventTerm(
+            func=reset_root_state_start_idx,
+            mode="reset",
+        )
 
     # store_data = EventTerm( 
     #     func= store_data,
@@ -738,8 +848,8 @@ class F1TenthTimeTrialEventsRandomCfg(F1TenthTimeTrialEventsCfg):
     #     func=mdp.randomize_rigid_body_material,
     #     mode="startup",
     #     params={
-    #         "static_friction_range": (0.0, 0.0),
-    #         "dynamic_friction_range": (0.0, 0.0),
+    #         "static_friction_range": (STATIC_FRICTION-0.1, STATIC_FRICTION+0.1),
+    #         "dynamic_friction_range": (DYNAMIC_FRICTION-0.2, DYNAMIC_FRICTION+0.2),
     #         "restitution_range": (0.0, 0.0),
     #         "num_buckets": 20,
     #         "asset_cfg": SceneEntityCfg("robot", body_names="wheel.*"),
@@ -907,25 +1017,26 @@ class F1TenthTimeTrialRewardsCfg:
     # Set "weight" to 0 to deactivate a reward term
 
     # Penalty if the car goes off-track (it would be crashing on the walls), weight=1
-    out_of_track = RewTerm(
-        func=out_of_track_penalty,
-        weight=0.5,
-    )
+    # out_of_track = RewTerm(
+    #     func=out_of_track_penalty,
+    #     weight=1,
+    # )
 
     # Standard reward for progressing along centerline, weight=1
     progress_rew = RewTerm(
         func=progress_rew,
-        weight=0.5,
+        weight=0.0000001,
     )
 
-    # Reward terms to test various frictions, simple task (constant velocity and steering, drive in circle)
-    speed_target_rew = RewTerm(
-        func=speed_target_rew,
-        params={
-            "speed_target": 8
-        },
-        weight= 1.,
-    )
+    if CONFIG['env_config']['CONSTANT_SPEED']:
+        # # # Reward terms to test various frictions, simple task (constant velocity and steering, drive in circle)
+        speed_target_rew = RewTerm(
+            func=speed_target_rew,
+            params={
+                "speed_target": CONFIG['env_config']['CONSTANT_SPEED_TARGET']
+            },
+            weight= 1.,
+        )
 
     # steering_target_rew = RewTerm(
     #     func=steering_target_rew,
@@ -1050,17 +1161,17 @@ class F1TenthTimeTrialTerminationsCfg:
         func=mdp.time_out, 
         time_out=True)
 
-    # Car goes out of track
-    non_traversable = DoneTerm(
-        func=is_not_traversable
-    )
-
     # Car rolls over
     rollover = DoneTerm(
         func=upright_bool,
         params={"thresh_deg": 90.},
     )
 
+    # Car goes out of track
+    if CONFIG['env_config']['NON_TRAVERSABLE_TERMINATION']:
+        non_traversable = DoneTerm(
+            func=is_not_traversable
+        )
 
     # out_range = DoneTerm(
     #     func=out_of_map,
@@ -1077,11 +1188,7 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
     ######################
     # MAP_NAME_LIST, to be manually changed here (it would be nice to pass it via hydra cfg)
     # THE INITIALIZATION TIME EXPONENTIALLY INCREASE WITH THE 
-
-    # MAP_NAME_LIST: str = ['THETRACK', 'GLC_smile_small', 'GLC_pit_rbring1']
-    # MAP_NAME_LIST: str = ['icra25_v6', 'THETRACK', 'ITA', 'CHN']
-    # MAP_NAME_LIST: str = ['THETRACK', 'ITA', 'CHN']
-    MAP_NAME_LIST: str = ['CRL']
+    MAP_NAME_LIST: List[str] = CONFIG['env_config']['MAP_NAME_LIST']
 
     ######################
 
@@ -1109,11 +1216,12 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
         self.viewer.lookat = [0.0, 0.0, -3.]
         self.sim.dt = 0.01
         self.decimation = 8
-        self.sim.render_interval = self.decimation
+        # self.sim.render_interval = self.decimation
+        self.sim.render_interval = 1
 
         # Terminations config
         self.episode_length_s = 20
-        self.actions.throttle_steer.scale = (12, 0.488)
+        # self.actions.throttle_steer.scale = (10, 0.41)
 
 
         # Terrain variables
@@ -1166,10 +1274,10 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
             height_list=height_list,
             origin_list=ORIGIN_LIST,
             physics_material=sim_utils.RigidBodyMaterialCfg(
-                friction_combine_mode="multiply",
+                friction_combine_mode="average",
                 restitution_combine_mode="multiply",
-                static_friction=1.0,
-                dynamic_friction=1.0,
+                static_friction=STATIC_FRICTION,
+                dynamic_friction=DYNAMIC_FRICTION,
             ),
             debug_vis=True,
         )
@@ -1233,7 +1341,7 @@ class F1TenthTimeTrialPlayEnvCfg(F1TenthTimeTrialRLEnvCfg):
     """no terminations"""
 
     events: F1TenthTimeTrialEventsCfg = F1TenthTimeTrialEventsRandomCfg(
-        reset_root_state = EventTerm(
+        reset_root_state_start_idx = EventTerm(
             func=reset_root_state_start_idx,
             mode="reset",
         )

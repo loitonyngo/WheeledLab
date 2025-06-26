@@ -8,7 +8,7 @@ from isaaclab.assets import Articulation, RigidObject
 from isaaclab.terrains import TerrainImporter
 from ..utils import find_nearest_waypoint
 
-def reset_root_state(
+def reset_root_state_random(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor,
     # valid_posns_and_rots: dict[str, tuple[float, float]],

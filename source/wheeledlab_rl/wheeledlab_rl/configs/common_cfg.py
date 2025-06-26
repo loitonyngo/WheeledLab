@@ -56,7 +56,7 @@ class EnvSetup:
     num_envs: int = 1024                # Number of environments to simulate
     env_spacing: int = 0                # Spacing between environments
     task_name: str = MISSING            # Name of the task
-
+    
 @configclass
 class AgentSetup:
     # TODO: Is this necessary?

@@ -18,10 +18,10 @@ class F1Tenth4WDActionCfg:
             "rotator_left",
             "rotator_right",
         ],
-        base_length=0.365,
-        base_width=0.284,
-        wheel_radius=0.05,
-        scale=(10.0, 0.488),
+        base_length=0.365, # 32
+        base_width=0.284, # half wheel 25, including full wheel 29
+        wheel_radius=0.055, # wheelwidth = 0.045
+        scale=(10.0, 0.41),
         no_reverse=True,
         bounding_strategy="clip",
         asset_name="robot",
