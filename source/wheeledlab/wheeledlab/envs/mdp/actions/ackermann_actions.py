@@ -122,12 +122,12 @@ class AckermannAction(ActionTerm):
 
         if self._bounding_strategy == 'clip':
             # useful for testing
-            # MAX_SPEED = 10
-            # SET_SPEED = 5
-            # MAX_ANGLE = 0.41
-            # SET_ANGLE = -0.001
-            # actions[:,0] = torch.ones(actions.shape[0])*(SET_SPEED/MAX_SPEED)
-            # actions[:,1] = torch.ones(actions.shape[0])*(SET_ANGLE/MAX_ANGLE)
+            MAX_SPEED = 10
+            SET_SPEED = 3
+            MAX_ANGLE = 0.40
+            SET_ANGLE = 0.1
+            actions[:,0] = torch.ones(actions.shape[0])*(SET_SPEED/MAX_SPEED)
+            actions[:,1] = torch.ones(actions.shape[0])*(SET_ANGLE/MAX_ANGLE)
 
             self._processed_actions = torch.clip(actions, min=-1.0, max=1.0) * self._scale + self._offset
 

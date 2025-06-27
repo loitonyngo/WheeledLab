@@ -722,7 +722,7 @@ class F1TenthTimeTrialSceneCfg(InteractiveSceneCfg):
         spawn = sim_utils.GroundPlaneCfg(size=(1000, 1000),
                                          color=(0,0,0),
                                          physics_material=sim_utils.RigidBodyMaterialCfg(
-                                            friction_combine_mode="average",
+                                            friction_combine_mode="multiply",
                                             restitution_combine_mode="multiply",
                                             static_friction=STATIC_FRICTION,
                                             dynamic_friction=DYNAMIC_FRICTION,
@@ -733,7 +733,7 @@ class F1TenthTimeTrialSceneCfg(InteractiveSceneCfg):
     # Add light configuration
     light = AssetBaseCfg(
         prim_path="/World/light",
-        spawn=sim_utils.DistantLightCfg(color=(0.5, 0.5, 0.5), intensity=3000.0),
+        spawn=sim_utils.DistantLightCfg(color=(0.5, 0.5, 0.5), intensity=1500.0),
     )
 
     robot: AssetBaseCfg = F1TENTH_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
@@ -1221,7 +1221,7 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
 
         # Terminations config
         self.episode_length_s = 20
-        # self.actions.throttle_steer.scale = (10, 0.41)
+        self.actions.throttle_steer.scale = (CONFIG['env_config']['MAX_SPEED_SCALING'], CONFIG['env_config']['MAX_STEERING_SCALING'])
 
 
         # Terrain variables
@@ -1230,7 +1230,8 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
 
         # Folder where you save the usd files, name can be optimized, now it is possible it creates the same files with different names
         stage_path = os.path.join(WHEELEDLAB_ASSETS_DATA_DIR, 'maps', timestamp + '_test.usd')
-        ORIGIN_LIST = [[0, 0], [28, 0], [0, 28], [28, 28]]
+        ORIGIN_LIST = CONFIG['env_config']['ORIGIN_LIST']
+
         
         # Folder where you have the maps (race stack format)
         maps_folder_path = '/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/timetrial/utils/maps'    
@@ -1274,7 +1275,7 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
             height_list=height_list,
             origin_list=ORIGIN_LIST,
             physics_material=sim_utils.RigidBodyMaterialCfg(
-                friction_combine_mode="average",
+                friction_combine_mode="multiply",
                 restitution_combine_mode="multiply",
                 static_friction=STATIC_FRICTION,
                 dynamic_friction=DYNAMIC_FRICTION,

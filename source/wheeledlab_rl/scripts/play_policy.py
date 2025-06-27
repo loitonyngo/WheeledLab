@@ -15,6 +15,7 @@ This command will save data and record a video of the playback using an existing
 
 from wheeledlab_rl.startup import startup
 import argparse
+from datetime import datetime
 
 parser = argparse.ArgumentParser(description="Play a policy in WheeledLab.")
 # These arguments assume that a run folder can be found
@@ -27,12 +28,14 @@ parser = argparse.ArgumentParser(description="Play a policy in WheeledLab.")
 ###### DEFINE POLICY TO PLAY ######
 ###################################
 DEFAULT_LOGS_PATH = "/home/tongo/WheeledLab/source/wheeledlab_rl/logs/"
-POLICY = 'quiet-shape-995'
-###################################
-###################################
-###################################
+POLICY = 'divine-universe-1005'
+SAVE_NAME = 'test'
+SAVE_DIR = '/home/tongo/WheeledLab/source/wheeledlab_rl/logs_play_policy'
+TIMESTAMP = datetime.now().strftime("%m%d_%H%M")
 
-
+###################################
+###################################
+###################################
 
 
 parser.add_argument('-p', "--run-path", type=str, 
@@ -43,10 +46,13 @@ parser.add_argument("--checkpoint", type=int, default=None, help="Checkpoint to 
 # If no run folder, the task and policy model must be provided
 parser.add_argument("--task", type=str, default=None, help="Task name. Overrides run config env if provided")
 parser.add_argument("--policy-path", type=str, default=None, help="Path to policy file.")
+
 # Playback
 parser.add_argument("--steps", type=int, default=100, help="Length of recorded video in steps")
 # Logging
 parser.add_argument('-sd', "--save-data", action="store_true", default=True, help="Save episode data")
+parser.add_argument("--save-name", type=str, default=SAVE_NAME, help="Name save file.")
+
 parser.add_argument("--video", action="store_true", help="Record video of the playback")
 parser.add_argument("--log-dir", type=str, default="playback/",
                     help="Directory to save logs. If run path is provided, this is ignored.")
@@ -215,7 +221,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
             except:
                 print('WARNING: could not torch.stack')
                 continue
-        save_path = os.path.join(playback_dir, f"{args_cli.play_name}-rollouts.pt")
+        
+        # Base filename without extension
+        base_name = os.path.join(SAVE_DIR, f"{args_cli.save_name}")
+        
+        # Check if file exists and find appropriate suffix
+        suffix = ""
+        counter = 0
+        while True:
+            save_path = f"{base_name}{suffix}.pt"
+            if not os.path.exists(save_path):
+                break
+            suffix = f"_{counter}"
+            counter += 1
+        
         torch.save(data, save_path)
         print(f"[INFO] Saved episode data to: {save_path}")
 
@@ -224,10 +243,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
 
 
     # Load the saved data
-    data_path = "/home/tongo/WheeledLab/source/wheeledlab_rl/logs/"+POLICY+"/playback/play-name-rollouts.pt"
+    data_path = save_path
     data = torch.load(data_path)
-
-
 
     # Convert to numpy for plotting (if needed)
     actions = data['actions'].cpu().numpy()            # Shape: [timesteps, num_envs, action_dim]

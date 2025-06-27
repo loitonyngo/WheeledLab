@@ -4,13 +4,13 @@ import numpy as np
 from matplotlib.lines import Line2D
 
 # List of policies to compare
-# POLICY_LIST = [
+# log_LIST = [
 #     'glad-microwave-949',
 #     'earnest-deluge-952',
 # ]
 # increasing dynamic friction
 
-# POLICY_LIST = [
+# log_LIST = [
 #     'glad-microwave-949',
 #     'earnest-deluge-952',
 #     'honest-dragon-953',
@@ -18,9 +18,9 @@ from matplotlib.lines import Line2D
 #     'brisk-butterfly-955'
 
 # ]
-POLICY_LIST = [
-    'deft-dawn-993',
-    'lilac-spaceship-994'
+LOG_LIST = [
+    'test_3',
+    'test_2'
 ]
 # Color cycle for different policies
 COLORS = plt.rcParams['axes.prop_cycle'].by_key()['color']
@@ -30,16 +30,16 @@ start_idx = 0
 end_idx = 1000
 
 # Create dictionary to store all data
-policy_data = {}
+log_data = {}
 
-# Load data for each policy
-for policy in POLICY_LIST:
+# Load data for each log
+for log in LOG_LIST:
     try:
-        data_path = f"/home/tongo/WheeledLab/source/wheeledlab_rl/logs/{policy}/playback/play-name-rollouts.pt"
+        data_path = f"/home/tongo/WheeledLab/source/wheeledlab_rl/logs_play_policy/{log}.pt"
         data = torch.load(data_path)
         
         # Convert to numpy and store
-        policy_data[policy] = {
+        log_data[log] = {
             'actions': data['actions'].cpu().numpy(),
             'observations': data['observations'].cpu().numpy(),
             'time': data['time'].cpu().numpy(),
@@ -49,34 +49,34 @@ for policy in POLICY_LIST:
         
         # Try loading bounds if they exist
         try:
-            policy_data[policy]['inner'] = torch.squeeze(data['inner_bounds']).cpu().numpy()
-            policy_data[policy]['outer'] = torch.squeeze(data['outer_bounds']).cpu.numpy()
+            log_data[log]['inner'] = torch.squeeze(data['inner_bounds']).cpu().numpy()
+            log_data[log]['outer'] = torch.squeeze(data['outer_bounds']).cpu.numpy()
         except:
             pass
             
     except FileNotFoundError:
-        print(f"Warning: Could not load data for policy {policy}")
+        print(f"Warning: Could not load data for log {log}")
         continue
 
 # Plot Actions Comparison
 plt.figure(figsize=(12, 6))
-for i, (policy, data) in enumerate(policy_data.items()):
+for i, (log, data) in enumerate(log_data.items()):
     color = COLORS[i % len(COLORS)]
     for env_idx in range(data['actions'].shape[1]):
         plt.plot(data['time'][start_idx:end_idx], 
                 data['actions'][start_idx:end_idx, env_idx, 0], 
                 color=color, 
                 alpha=0.7,
-                label=f'{policy} Throttle' if env_idx == 0 else None)
+                label=f'{log} Throttle' if env_idx == 0 else None)
         plt.plot(data['time'][start_idx:end_idx], 
                 data['actions'][start_idx:end_idx, env_idx, 1], 
                 '--', 
                 color=color,
                 alpha=0.7,
-                label=f'{policy} Steering' if env_idx == 0 else None)
+                label=f'{log} Steering' if env_idx == 0 else None)
 plt.xlabel("Time [s]")
 plt.ylabel("Action Value")
-plt.title("Policy Actions Comparison")
+plt.title("log Actions Comparison")
 plt.legend()
 plt.grid()
 plt.show()
@@ -84,7 +84,7 @@ plt.show()
 # Plot Velocity and Acceleration Comparison
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
 
-for i, (policy, data) in enumerate(policy_data.items()):
+for i, (log, data) in enumerate(log_data.items()):
     color = COLORS[i % len(COLORS)]
     time = data['time'][start_idx:end_idx]
     obs = data['observations'][start_idx:end_idx]
@@ -96,10 +96,10 @@ for i, (policy, data) in enumerate(policy_data.items()):
     acceleration = np.append(acceleration, np.nan)
     
     # Plot velocities
-    ax1.plot(time, vel, color=color, label=policy)
+    ax1.plot(time, vel, color=color, label=log)
     
     # Plot acceleration
-    ax2.plot(time, acceleration, color=color, label=policy)
+    ax2.plot(time, acceleration, color=color, label=log)
 
 # Format velocity plot
 ax1.set_ylabel("Velocity [m/s]")
@@ -120,8 +120,8 @@ plt.show()
 # Plot Trajectory Comparison
 plt.figure(figsize=(10, 10))
 
-# Plot bounds (from first available policy)
-for policy, data in policy_data.items():
+# Plot bounds (from first available log)
+for log, data in log_data.items():
     try:
         plt.scatter(data['inner'][:,0], data['inner'][:,1], color='black')
         plt.scatter(data['outer'][:,0], data['outer'][:,1], color='black')
@@ -130,7 +130,7 @@ for policy, data in policy_data.items():
         continue
 
 # Plot trajectories
-for i, (policy, data) in enumerate(policy_data.items()):
+for i, (log, data) in enumerate(log_data.items()):
     color = COLORS[i % len(COLORS)]
     pos_xy = data['pos_xy'][start_idx:end_idx]
     vel = np.sqrt(np.square(data['observations'][start_idx:end_idx, 0, 0]) + 
@@ -142,12 +142,12 @@ for i, (policy, data) in enumerate(policy_data.items()):
                     c=vel, 
                     cmap='viridis', 
                     alpha=0.7,
-                    label=policy)
+                    label=log)
 
 # Create custom legend
-legend_elements = [Line2D([0], [0], marker='o', color='w', label=policy,
+legend_elements = [Line2D([0], [0], marker='o', color='w', label=log,
                   markerfacecolor=COLORS[i], markersize=10) 
-                  for i, policy in enumerate(policy_data.keys())]
+                  for i, log in enumerate(log_data.keys())]
 plt.legend(handles=legend_elements)
 
 plt.title("Trajectory Comparison")

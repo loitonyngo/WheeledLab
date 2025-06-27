@@ -12,3 +12,9 @@ source/wheeledlab_assets/data/waypoints_f.usd
 source/wheeledlab_assets/data/waypoints.usd
 source/wheeledlab_tasks/wheeledlab_tasks/timetrial/utils/maps
 source/wheeledlab_assets/data/Robots/
+source/wheeledlab_rl/logs_play_policy/pinco.pt
+source/wheeledlab_rl/logs_play_policy/test_0.pt
+source/wheeledlab_rl/logs_play_policy/test_1.pt
+source/wheeledlab_rl/logs_play_policy/test_2.pt
+source/wheeledlab_rl/logs_play_policy/test_3.pt
+source/wheeledlab_rl/logs_play_policy/test.pt
