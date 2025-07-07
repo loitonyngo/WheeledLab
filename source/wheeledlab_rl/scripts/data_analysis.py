@@ -19,8 +19,7 @@ from matplotlib.lines import Line2D
 
 # ]
 LOG_LIST = [
-    'test_3',
-    'test_2'
+    'friction_1',
 ]
 # Color cycle for different policies
 COLORS = plt.rcParams['axes.prop_cycle'].by_key()['color']

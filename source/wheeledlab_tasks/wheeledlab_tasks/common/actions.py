@@ -21,7 +21,7 @@ class F1Tenth4WDActionCfg:
         base_length=0.365, # 32
         base_width=0.284, # half wheel 25, including full wheel 29
         wheel_radius=0.055, # wheelwidth = 0.045
-        scale=(10.0, 0.41),
+        scale=(10.0, 0.40),
         no_reverse=True,
         bounding_strategy="clip",
         asset_name="robot",

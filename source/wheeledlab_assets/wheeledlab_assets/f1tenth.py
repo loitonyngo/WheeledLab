@@ -1,5 +1,5 @@
 import isaaclab.sim as sim_utils
-from isaaclab.actuators import ImplicitActuatorCfg, DCMotorCfg
+from isaaclab.actuators import ImplicitActuatorCfg, DCMotorCfg, DelayedImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg
 
 from . import WHEELEDLAB_ASSETS_DATA_DIR
@@ -7,23 +7,25 @@ from . import WHEELEDLAB_ASSETS_DATA_DIR
 # F1Tenth 4WD actuator configuration.
 # For 4WD, all throttle joints (front and back) are active.
 F1TENTH_4WD_ACTUATOR_CFG = {
-    "steering_joints": ImplicitActuatorCfg(
+    "steering_joints": DelayedImplicitActuatorCfg(
         joint_names_expr=["rotator_(left|right)"],
-        velocity_limit=10.0,    # F1Tenth steering is slightly slower than Hound
-        effort_limit=2.5,
-        stiffness=120.0,
-        damping=8.0,
-        friction=0.01,
-    ),
+        velocity_limit=8,    # F1Tenth steering is slightly slower than Hound
+        effort_limit=1.0,
+        stiffness=200.0,
+        damping=0,
+        friction=0.0,
+        min_delay=16,  # Delays depends on physics step size! e.g. if physics step is 0.025s and max_delay is 2, then the delay is 0.2s.
+        max_delay=16), 
+
     "throttle_joints": DCMotorCfg(
         joint_names_expr=[".*wheel_(back|front)_.*"],  # Matches all throttle joints (e.g. wheel_back_left, wheel_front_right, etc.)
         saturation_effort=1.0,
-        effort_limit=0.25,   # Adjusted for the 3s VXL-3s motor/ESC
+        effort_limit=0.22,   # Adjusted for the 3s VXL-3s motor/ESC
         velocity_limit=400.0,  # Reduced speed compared to a 4s system
-        stiffness=10,
+        stiffness=0,
         # damping=1100.0,
-        damping=100.0,
-        friction=0.01,
+        damping=10000.0,
+        friction=0.05
     ),
 }
 

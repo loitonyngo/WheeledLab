@@ -23,6 +23,7 @@ from isaaclab.managers import (
     ObservationGroupCfg as ObsGroup,
     ObservationTermCfg as ObsTerm,
     CurriculumTermCfg as CurrTerm,
+    CommandTermCfg as CmdTerm,
     SceneEntityCfg,
 )
 from isaaclab.sensors import TiledCameraCfg
@@ -684,8 +685,8 @@ class F1TenthTimeTrialTerrainImporterCfg(TerrainImporterCfg):
         valid_init_poses = [
             InitialPoseCfg(
                 pos=(x, y, 0.02),
-                rot_euler_xyz_deg=(0., 0., angle)
-                # rot_euler_xyz_deg=(0., 0., 0)
+                # rot_euler_xyz_deg=(0., 0., angle)
+                rot_euler_xyz_deg=(0., 0., 0)
             ) for x, y, angle in init_poses
         ]
         return valid_init_poses, init_current_wps_idx
@@ -1177,6 +1178,7 @@ class F1TenthTimeTrialTerminationsCfg:
     #     func=out_of_map,
     # )
 
+
 @configclass
 class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
 
@@ -1214,10 +1216,10 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
         # viewer settings
         self.viewer.eye = [0., 0.0, 35.0] 
         self.viewer.lookat = [0.0, 0.0, -3.]
-        self.sim.dt = 0.01
-        self.decimation = 8
+        self.sim.dt = 0.025/4
+        self.decimation = 4
         # self.sim.render_interval = self.decimation
-        self.sim.render_interval = 1
+        self.sim.render_interval = self.decimation
 
         # Terminations config
         self.episode_length_s = 20
