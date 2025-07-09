@@ -991,6 +991,8 @@ def progress_waypoint_bool(env):
     # Store extras (using first map's waypoints count for simplicity), only necessary when you play policy, find a better way to implement it
     # env.extras['inner'] =  torch.tensor(env.scene.terrain.cfg.inner_list[map_level][current_idx], device=env.device)
     # env.extras['outer'] = torch.tensor(env.scene.terrain.cfg.outer_list[map_level][current_idx], device=env.device)
+    asset = env.scene["robot"]
+    env.extras['theta'] = asset.data.heading_w
     env.extras['pos_xy'] = position_xy_world
     env.extras['s_idx'] = current_idx.clone()
     env.extras['time'] = torch.tensor(env.sim.current_time, device=env.device)

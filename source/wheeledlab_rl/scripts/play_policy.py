@@ -36,7 +36,7 @@ SAVE_DIR = '/home/tongo/WheeledLab/source/wheeledlab_rl/logs_play_policy'
 TIMESTAMP = datetime.now().strftime("%m%d_%H%M")
 
 REAL_DATA_DIR = "/home/tongo/WheeledLab/source/wheeledlab_rl/real_data/"
-REAL_DATA_NAME = "bb_speed_4_angle_1_p_2.csv"
+REAL_DATA_NAME = "bb_speed_2_angle_3_p_1.csv"
 # REAL_DATA_NAME = "speed_3_angle_1.csv"
 
 REAL_DATA_PATH = os.path.join(REAL_DATA_DIR, REAL_DATA_NAME)
@@ -170,6 +170,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
         'rewards': [],
         'actions': [],
         'pos_xy': [],
+        'theta': [],
         's_idx': [],
         'time': [],
         's_idx_max': [],
@@ -181,18 +182,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
 
     # reset environment
     obs, _ = env.get_observations()
-    action_testing = True  # Set to True if you want to test actions manually
 
+    action_testing = True  # Set to True if you want to test actions manually
     if action_testing:
         
         real_data = pd.read_csv(REAL_DATA_PATH)
 
         if args_cli.steps > len(real_data):
-            cmd_steering = torch.zeros(args_cli.steps, device=env.unwrapped.device)
-            cmd_velocity = torch.zeros(args_cli.steps, device=env.unwrapped.device)
-            time_data = torch.zeros(args_cli.steps, device=env.unwrapped.device)
-            cmd_steering[0:len(real_data["cmd_steering_angle"])] = torch.tensor(real_data["cmd_steering_angle"].values)
-            cmd_velocity[0:len(real_data["cmd_velocity"])] = torch.tensor(real_data["cmd_velocity"].values)
+            cmd_steering = torch.zeros(args_cli.steps+1, device=env.unwrapped.device)
+            cmd_velocity = torch.zeros(args_cli.steps+1, device=env.unwrapped.device)
+            time_data = torch.zeros(args_cli.steps+1, device=env.unwrapped.device)
+            cmd_steering[:len(real_data["cmd_steering_angle"])] = torch.tensor(real_data["cmd_steering_angle"].values)
+            cmd_velocity[:len(real_data["cmd_velocity"])] = torch.tensor(real_data["cmd_velocity"].values)
             time_data[:len(real_data["Time"])] = torch.tensor(real_data["Time"].values)
         else:
             cmd_steering = torch.tensor(real_data["cmd_steering_angle"].values)
@@ -234,8 +235,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
                 # actions[:,0] = torch.ones(actions.shape[0])*(SET_SPEED/MAX_SPEED)
                 # actions[:,1] = torch.ones(actions.shape[0])*(SET_ANGLE/MAX_ANGLE)
 
-                actions[:,0] = cmd_velocity[time_idx]/MAX_SPEED / CMD_TO_REAL_MULTIPLIER 
-                actions[:,1] = cmd_steering[time_idx]/MAX_ANGLE
+                actions[:,0] = cmd_velocity[time_idx+1]/MAX_SPEED / CMD_TO_REAL_MULTIPLIER 
+                actions[:,1] = cmd_steering[time_idx+1]/MAX_ANGLE
 
             # env stepping
             obs, rew, _, extras = env.step(actions)
@@ -243,6 +244,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
         data['observations'].append(obs)
         data['rewards'].append(rew)
         data['actions'].append(actions)
+        try:
+            data['theta'].append(extras['theta'])
+        except:
+            print('WARNING: could not store data')
         try:
             data['pos_xy'].append(extras['pos_xy'])
         except:
@@ -317,6 +322,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     time = data['time'].cpu().numpy()  
     
     s_idx = torch.squeeze(data['s_idx']).cpu().numpy()  
+    theta = torch.squeeze(data['theta']).cpu().numpy()
+
     reset_idx = np.where(np.diff(s_idx)<(-np.max(s_idx)+10))
     # start_idx = reset_idx[0][0] 
     # end_idx = reset_idx[0][1] 
@@ -354,10 +361,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     sim_mask = time <= global_end
 
     s_idx = s_idx[sim_mask]  # Trim s_idx accordingly
+    theta = theta[sim_mask]  # Trim theta accordingly
     time = time[sim_mask]
     observations = observations[sim_mask]  # Trim observations accordingly
     actions = actions[sim_mask]           # Trim actions accordingly
     pos_xy = pos_xy[sim_mask]             # Trim pos_xy accordingly
+    pos_xy[:,0] = pos_xy[:,0]-pos_xy[0,0]
+    pos_xy[:,1] = pos_xy[:,1]-pos_xy[0,1]
+
+
     vel = vel[sim_mask]                 # Trim vel accordingly
     acceleration = acceleration[sim_mask]  # Trim acceleration accordingly
 
@@ -366,15 +378,25 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     # Step 1: Extract relevant data
     sim_time = time  # Already trimmed
     sim_vx = observations[:, 0, 0]  # Simulated vx
+
     real_time = real_data['Time'].values
     real_vx = real_data['vx'].values
+    real_x = real_data['x'].values
+    real_y = real_data['y'].values
 
     # Step 2: Interpolate sim vx to real_time points
     sim_vx_interp_func = interp1d(sim_time, sim_vx, kind='linear', fill_value="extrapolate")
+    x_interp_func = interp1d(sim_time, pos_xy[:,0], axis=0, kind='linear', fill_value="extrapolate")
+    y_interp_func = interp1d(sim_time, pos_xy[:,1], axis=0, kind='linear', fill_value="extrapolate")
+
     sim_vx_interp = sim_vx_interp_func(real_time)
+    x_interp = x_interp_func(real_time)
+    y_interp = y_interp_func(real_time)
+
 
     # Step 3: Compute the difference
     vx_diff = real_vx - sim_vx_interp
+    xy_diff = np.sqrt((real_x - x_interp)**2 + (real_y - y_interp)**2)
 
     try:
         inner = torch.squeeze(data['inner_bounds']).cpu().numpy() 
@@ -382,12 +404,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     except:
         print('WARNING try except')
 
-    plt.figure(figsize=(15, 12))  # Larger figure to accommodate all subplots
+    plt.figure(figsize=(15, 15))  # Adjusted height for 4 subplots
 
     # ---------------------------
     # Subplot 1: Command Velocity and Steering
     # ---------------------------
-    ax1 = plt.subplot(3, 1, 1)
+    ax1 = plt.subplot(4, 1, 1)
     ax1b = ax1.twinx()
 
     # Plot velocity on ax1 (left y-axis)
@@ -418,7 +440,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     # ---------------------------
     # Subplot 2: Linear Velocity and Acceleration
     # ---------------------------
-    ax2 = plt.subplot(3, 1, 2, sharex=ax1)
+    ax2 = plt.subplot(4, 1, 2, sharex=ax1)
     ax2b = ax2.twinx()
 
     # Plot linear velocities
@@ -457,17 +479,45 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     # ---------------------------
     # Subplot 3: Angular Velocity
     # ---------------------------
-    ax3 = plt.subplot(3, 1, 3, sharex=ax1)
+    ax3 = plt.subplot(4, 1, 3, sharex=ax1)
+    ax3b = ax3.twinx()
+
     ax3.plot(time[start_idx:end_idx], observations[start_idx:end_idx, 0, 2], 
             color='g', label='Sim Ang Vel Z')
     ax3.plot(real_data['Time'], real_data['omega'], 
             label='Real Ang Vel Z', color='g', linestyle='--')
 
-    ax3.set_xlabel("time [s]")
-    ax3.set_ylabel("ang velocity [rad/s]")  # Corrected unit
+    ax3b.plot(time[start_idx:end_idx], theta[start_idx:end_idx], 
+            color='r', label='Sim Theta')
+    ax3b.plot(real_data['Time'], real_data['theta'], 
+            label='Real theta', color='r', linestyle='--')
+
+    ax3b.set_ylabel("heading angle [rad]", color='r')
+    ax3b.tick_params(axis='y', labelcolor='r')
+
+    ax3.set_ylabel("ang velocity [rad/s]")
     ax3.legend()
     ax3.grid(True)
     ax3.set_title("Angular Velocity")
+
+    lines3, labels3 = ax3.get_legend_handles_labels()
+    lines3b, labels3b = ax3b.get_legend_handles_labels()
+    ax3.legend(lines3 + lines3b, labels3 + labels3b, loc='upper right')
+    ax3.set_title("Angular Velocity and Heading Angle")
+    ax3.grid(True)
+
+    # ---------------------------
+    # Subplot 4: Position Difference
+    # ---------------------------
+    ax4 = plt.subplot(4, 1, 4, sharex=ax1)
+    ax4.plot(real_data['Time'], xy_diff, 
+            label='xy pos diff', color='black')
+
+    ax4.set_xlabel("time [s]")
+    ax4.set_ylabel("xy diff [m]")
+    ax4.legend()
+    ax4.grid(True)
+    ax4.set_title("Position Difference (Real vs Sim)")
 
     plt.tight_layout()
     plt.show()
@@ -495,12 +545,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     real = plt.scatter(real_data['x'], real_data['y'],                
                     c=real_data['vx'], cmap='plasma', alpha=0.75)  
 
-    sim = plt.scatter(pos_xy[start_idx:end_idx,0]-pos_xy[0,0], 
-                    pos_xy[start_idx:end_idx,1]-pos_xy[0,1],                
+    sim = plt.scatter(pos_xy[start_idx:end_idx,0], 
+                    pos_xy[start_idx:end_idx,1],                
                     c=vel[start_idx:end_idx], cmap='coolwarm', alpha=0.75)
 
     plt.scatter(0, 0, color='black', label='Start Position (sim)')  # Start is (0, 0)s
-    plt.scatter(pos_xy[-1,0] - pos_xy[0,0], pos_xy[-1,1] - pos_xy[0,1], color='red', label='End Position (sim)')
+    plt.scatter(pos_xy[-1,0], pos_xy[-1,1], color='red', label='End Position (sim)')
 
     # Start and End for Real
     plt.scatter(real_data['x'].iloc[0], real_data['y'].iloc[0], color='black', label='Start Position (data)')

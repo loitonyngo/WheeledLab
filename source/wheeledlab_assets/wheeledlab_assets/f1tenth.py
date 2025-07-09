@@ -1,5 +1,5 @@
 import isaaclab.sim as sim_utils
-from isaaclab.actuators import ImplicitActuatorCfg, DCMotorCfg, DelayedImplicitActuatorCfg
+from isaaclab.actuators import ImplicitActuatorCfg, DCMotorCfg, DelayedImplicitActuatorCfg, DCMotorModCfg, DelayedPDActuatorCfg
 from isaaclab.assets import ArticulationCfg
 
 from . import WHEELEDLAB_ASSETS_DATA_DIR
@@ -14,18 +14,21 @@ F1TENTH_4WD_ACTUATOR_CFG = {
         stiffness=200.0,
         damping=0,
         friction=0.0,
-        min_delay=16,  # Delays depends on physics step size! e.g. if physics step is 0.025s and max_delay is 2, then the delay is 0.2s.
-        max_delay=16), 
+        min_delay=24,  # Delays depends on physics step size! e.g. if physics step is 0.025s and max_delay is 2, then the delay is 0.2s.
+        max_delay=24), 
 
-    "throttle_joints": DCMotorCfg(
+    "throttle_joints": DCMotorModCfg(
         joint_names_expr=[".*wheel_(back|front)_.*"],  # Matches all throttle joints (e.g. wheel_back_left, wheel_front_right, etc.)
-        saturation_effort=1.0,
-        effort_limit=0.22,   # Adjusted for the 3s VXL-3s motor/ESC
+        saturation_effort=1,
+        effort_limit=0.50,  # Adjusted for the 3s VXL-3s motor/ESC
         velocity_limit=400.0,  # Reduced speed compared to a 4s system
-        stiffness=0,
-        # damping=1100.0,
-        damping=10000.0,
-        friction=0.05
+        stiffness=0.0,
+        damping=5.0,
+        friction=0.00,
+        min_delay=8,  # Delays depends on physics step size! e.g. if physics step is 0.025s and max_delay is 2, then the delay is 0.2s.
+        max_delay=8,
+        low_velocity_threshold= 28.0, # [rad/s] Reduced low velocity threshold for 3s system 
+        low_velocity_effort_limit= 0.14,  # Reduced low velocity effort limit for 3s system
     ),
 }
 
