@@ -30,7 +30,7 @@ parser = argparse.ArgumentParser(description="Play a policy in WheeledLab.")
 ###### DEFINE POLICY TO PLAY ######
 ###################################
 DEFAULT_LOGS_PATH = "/home/tongo/WheeledLab/source/wheeledlab_rl/logs/"
-POLICY = 'quiet-plasma-1047'
+POLICY = 'elated-planet-1064'
 SAVE_NAME = 'test'
 SAVE_DIR = '/home/tongo/WheeledLab/source/wheeledlab_rl/logs_play_policy'
 TIMESTAMP = datetime.now().strftime("%m%d_%H%M")
@@ -183,7 +183,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     # reset environment
     obs, _ = env.get_observations()
 
-    action_testing = True  # Set to True if you want to test actions manually
+    action_testing = False  # Set to True if you want to test actions manually
     if action_testing:
         
         real_data = pd.read_csv(REAL_DATA_PATH)

@@ -40,7 +40,7 @@ from wheeledlab_tasks.common import Mushr4WDActionCfg
 from wheeledlab_tasks.common import F1Tenth4WDActionCfg, LB4WDActionCfg
 from .disable_lidar import disable_all_lidars
 
-from .utils import create_maps_from_waypoints, generate_random_poses, generate_random_poses_from_list, generate_start_idx_poses_from_list, TraversabilityHashmapUtil, find_nearest_waypoint 
+from .utils import create_maps_from_waypoints, generate_random_poses, generate_random_poses_from_list, generate_start_idx_poses_from_list, generate_random_poses_from_waypoints, TraversabilityHashmapUtil, find_nearest_waypoint 
 from . import mdp_sensors
 from .mdp import reset_root_state_random, reset_root_state_start_idx
 
@@ -830,14 +830,16 @@ class F1TenthTimeTrialTerrainImporterCfg(TerrainImporterCfg):
     )
     debug_vis = True
     
-    def generate_random_poses(self, env : ManagerBasedEnv, env_ids, num_poses):
+    def generate_random_poses_from_waypoints(self, env : ManagerBasedEnv, env_ids, num_poses):
         
         # generate random initial poses with margin
         env_origins = env.scene.env_origins
         map_levels = env._map_levels
         # add which map level
 
-        init_poses, init_current_wps_idx = generate_random_poses_from_list(env_ids, num_poses, map_levels, env_origins, self.origin_list, self.row_spacing_list, self.col_spacing_list, self.traversability_hashmap_list, self.waypoints_list, self.outer_list, self.inner_list, margin=0.1)
+        init_poses, init_current_wps_idx = generate_random_poses_from_waypoints(env_ids, num_poses, map_levels, env_origins, self.origin_list, self.waypoints_list, self.inner_list, margin=0.1)
+        # init_poses, init_current_wps_idx = generate_random_poses_from_list(env_ids, num_poses, map_levels, env_origins, self.origin_list, self.row_spacing_list, self.col_spacing_list, self.traversability_hashmap_list, self.waypoints_list, self.outer_list, self.inner_list, margin=0.1)
+        
         valid_init_poses = [
             InitialPoseCfg(
                 pos=(x, y, 0.02),
@@ -1041,6 +1043,67 @@ class F1TenthTimeTrialEventsRandomCfg(F1TenthTimeTrialEventsCfg):
 ###### REWARDS #######
 ######################
 
+def wall_collision_penalty(env):
+    pos_xy_world = mdp.root_pos_w(env)[..., :2]
+    num_envs = pos_xy_world.shape[0]
+
+    if not hasattr(env, '_map_levels'):
+        env._map_levels = torch.zeros(env.num_envs, 
+                                dtype=torch.long,
+                                device=env.device)
+        
+    # Get map levels for all environments
+    map_levels = env._map_levels  # shape: [num_envs]
+    unique_map_levels = torch.unique(map_levels)
+
+    collision_bool = torch.zeros(env.num_envs, 
+                                dtype=torch.long,
+                                device=env.device)
+    
+    for map_level in unique_map_levels:
+        # Create mask for environments using this map
+        env_mask = (map_levels == map_level)
+        num_envs_in_map = env_mask.sum()
+        
+        if num_envs_in_map == 0:
+            continue
+            
+        # Get positions for these environments
+        map_positions = pos_xy_world[env_mask]
+        
+        # Get waypoints for this map level
+        inner_xy_world = torch.tensor(
+            env.scene.terrain.cfg.inner_list[map_level],
+            device=env.device,
+            dtype=torch.float32
+        )[:, :2]
+
+        outer_xy_world = torch.tensor(
+            env.scene.terrain.cfg.outer_list[map_level],
+            device=env.device,
+            dtype=torch.float32
+        )[:, :2]
+
+        # Find nearest waypoint for these environments
+        nearest_to_inner_idx, dist_from_inner = find_nearest_waypoint(inner_xy_world, map_positions)  # shape: [num_envs_in_map]
+        nearest_to_outer_idx, dist_from_outer = find_nearest_waypoint(outer_xy_world, map_positions)  # shape: [num_envs_in_map]
+
+
+        # Check for collisions with inner and outer bounds
+        collision_with_inner = dist_from_inner < CONFIG['env_config']['COLLISION_RADIUS']
+        collision_with_outer = dist_from_outer < CONFIG['env_config']['COLLISION_RADIUS']
+        
+        # Combine collisions (OR operation - collision with either counts)
+        collisions_in_map = collision_with_inner | collision_with_outer
+        
+        # Convert collisions to long dtype (0 or 1)
+        collisions_in_map = collisions_in_map.long()
+        
+        # Update the collision_bool tensor for these environments
+        collision_bool[env_mask] = collisions_in_map
+
+    return torch.where(collision_bool.bool(), -1, 0)
+
 def traversable_reward(env):
     poses =mdp.root_pos_w(env)[..., :2]
     if not hasattr(env, '_map_levels'):
@@ -1208,10 +1271,16 @@ class F1TenthTimeTrialRewardsCfg:
     # Set "weight" to 0 to deactivate a reward term
 
     # Penalty if the car goes off-track (it would be crashing on the walls), weight=1
-    out_of_track = RewTerm(
-        func=out_of_track_penalty,
+    # out_of_track = RewTerm(
+    #     func=out_of_track_penalty,
+    #     weight=1,
+    # )
+
+    wall_collision_penalty = RewTerm(
+        func=wall_collision_penalty,
         weight=1,
     )
+
 
     # Standard reward for progressing along centerline, weight=1
     progress_rew = RewTerm(
@@ -1313,6 +1382,67 @@ def is_not_traversable(env):
 
     return torch.logical_not(delayed_traversability)
 
+def wall_collision(env):
+    pos_xy_world = mdp.root_pos_w(env)[..., :2]
+    num_envs = pos_xy_world.shape[0]
+
+    if not hasattr(env, '_map_levels'):
+        env._map_levels = torch.zeros(env.num_envs, 
+                                dtype=torch.long,
+                                device=env.device)
+        
+    # Get map levels for all environments
+    map_levels = env._map_levels  # shape: [num_envs]
+    unique_map_levels = torch.unique(map_levels)
+
+    collision_bool = torch.zeros(env.num_envs, 
+                                dtype=torch.long,
+                                device=env.device)
+    
+    for map_level in unique_map_levels:
+        # Create mask for environments using this map
+        env_mask = (map_levels == map_level)
+        num_envs_in_map = env_mask.sum()
+        
+        if num_envs_in_map == 0:
+            continue
+            
+        # Get positions for these environments
+        map_positions = pos_xy_world[env_mask]
+        
+        # Get waypoints for this map level
+        inner_xy_world = torch.tensor(
+            env.scene.terrain.cfg.inner_list[map_level],
+            device=env.device,
+            dtype=torch.float32
+        )[:, :2]
+
+        outer_xy_world = torch.tensor(
+            env.scene.terrain.cfg.outer_list[map_level],
+            device=env.device,
+            dtype=torch.float32
+        )[:, :2]
+
+        # Find nearest waypoint for these environments
+        nearest_to_inner_idx, dist_from_inner = find_nearest_waypoint(inner_xy_world, map_positions)  # shape: [num_envs_in_map]
+        nearest_to_outer_idx, dist_from_outer = find_nearest_waypoint(outer_xy_world, map_positions)  # shape: [num_envs_in_map]
+
+
+        # Check for collisions with inner and outer bounds
+        collision_with_inner = dist_from_inner < CONFIG['env_config']['COLLISION_RADIUS']
+        collision_with_outer = dist_from_outer < CONFIG['env_config']['COLLISION_RADIUS']
+        
+        # Combine collisions (OR operation - collision with either counts)
+        collisions_in_map = collision_with_inner | collision_with_outer
+        
+        # Convert collisions to long dtype (0 or 1)
+        collisions_in_map = collisions_in_map.long()
+        
+        # Update the collision_bool tensor for these environments
+        collision_bool[env_mask] = collisions_in_map
+
+    return collision_bool.bool()
+
 def is_reverse(env):
     reverse = reverse_waypoint_bool(env)
     return reverse
@@ -1373,8 +1503,12 @@ class F1TenthTimeTrialTerminationsCfg:
 
     # Car goes out of track
     if CONFIG['env_config']['NON_TRAVERSABLE_TERMINATION']:
-        non_traversable = DoneTerm(
-            func=is_not_traversable
+        # non_traversable = DoneTerm(
+        #     func=is_not_traversable
+        # )
+
+        wall_collision = DoneTerm(
+            func=wall_collision
         )
 
     # out_range = DoneTerm(

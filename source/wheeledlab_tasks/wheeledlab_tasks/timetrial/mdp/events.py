@@ -29,7 +29,7 @@ def reset_root_state_random(
     env._map_levels[env_ids] = torch.tensor(np.floor(np.random.rand(len(env_ids))*len(env.cfg.scene.terrain.traversability_hashmap_list)), device = env.device, dtype=torch.long)
 
     # valid_poses = terrain.cfg.generate_poses_from_init_points(env, env_ids)
-    valid_poses, current_idx_np = terrain.cfg.generate_random_poses(env=env, env_ids=env_ids, num_poses=len(env_ids))
+    valid_poses, current_idx_np = terrain.cfg.generate_random_poses_from_waypoints(env=env, env_ids=env_ids, num_poses=len(env_ids))
     current_idx = torch.tensor(current_idx_np, dtype=torch.long, device=env.device)
 
     # Tensorizes the valid poses

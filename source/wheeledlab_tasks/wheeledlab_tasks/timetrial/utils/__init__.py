@@ -326,14 +326,71 @@ def generate_random_poses(env_origins, env_ids, num_poses, row_spacing, col_spac
     
     return poses
 
-# def find_nearest_waypoint(waypoints: torch.Tensor, positions: torch.Tensor):
-#     """Optimized nearest waypoint finder."""
-#     # Squared distances are faster to compute and preserve order
-#     deltas = positions.unsqueeze(1) - waypoints.unsqueeze(0)
-#     sq_dists = torch.sum(deltas**2, dim=2)
-#     min_dist, closest_idx = torch.min(sq_dists, dim=1)
-#     return closest_idx, torch.sqrt(min_dist)  # Only sqrt the min distances
-
+def generate_random_poses_from_waypoints(env_ids, num_poses, map_levels, env_origins, map_origin_list, waypoints_usd_list, inner_usd_list, margin=0.1):
+    """
+    Generate random poses by selecting from waypoints, supporting multiple maps based on map_level.
+    Only generates poses for environments specified in env_ids.
+    """
+    # Convert inputs to numpy/torch as needed
+    env_ids_np = env_ids.cpu().numpy() if torch.is_tensor(env_ids) else np.array(env_ids)
+    map_levels_np = map_levels.cpu().numpy() if torch.is_tensor(map_levels) else np.array(map_levels)
+    
+    # Get map levels only for the requested environments
+    requested_map_levels = map_levels_np[env_ids_np]
+    
+    # Initialize output containers
+    all_xs_shifted = np.zeros(len(env_ids))
+    all_ys_shifted = np.zeros(len(env_ids))
+    current_wps_idx = np.zeros(len(env_ids))
+    all_angles = np.zeros(len(env_ids))
+    
+    # Process each unique map_level separately among the requested environments
+    unique_map_levels = np.unique(requested_map_levels)
+    
+    for map_level in unique_map_levels:
+        # Get indices (within env_ids) of environments with this map_level
+        env_mask = (requested_map_levels == map_level)
+        current_env_ids = env_ids_np[env_mask]
+        
+        # Skip if no environments use this map_level (shouldn't happen due to unique)
+        if len(current_env_ids) == 0:
+            continue
+            
+        # Get the waypoints for this map_level
+        waypoints_xy = torch.tensor(waypoints_usd_list[map_level])[:, :2].to(torch.float32)
+        inner_xy = torch.tensor(inner_usd_list[map_level])[:, :2].to(torch.float32)
+        num_waypoints = len(waypoints_xy)
+        
+        # Randomly select waypoints for each environment
+        selected_indices = np.random.choice(num_waypoints, size=len(current_env_ids), replace=True)
+        
+        # Get the positions of the selected waypoints
+        selected_waypoints = waypoints_xy[selected_indices]
+        xs = selected_waypoints[:, 0].numpy()
+        ys = selected_waypoints[:, 1].numpy()
+        
+        # Compute angles (looking at next waypoint)
+        lookahead = 5
+        next_indices = (selected_indices + lookahead) % num_waypoints
+        next_waypoints = waypoints_xy[next_indices]
+        
+        deltas = next_waypoints - selected_waypoints
+        angles = torch.rad2deg(torch.atan2(deltas[:, 1], deltas[:, 0])) + np.random.uniform(-15, 15, size=len(current_env_ids))
+        
+        # Shift the coordinates according to env_origins for the reset
+        xs_shifted = xs + env_origins[current_env_ids, 0].cpu().numpy() + np.array(map_origin_list)[map_level, 0] + np.random.rand()*0.3 - np.random.rand()*0.3
+        ys_shifted = ys + env_origins[current_env_ids, 1].cpu().numpy() + np.array(map_origin_list)[map_level, 1] + np.random.rand()*0.3 - np.random.rand()*0.3
+        
+        # Store results in the output arrays at the correct positions
+        all_xs_shifted[env_mask] = xs_shifted
+        all_ys_shifted[env_mask] = ys_shifted
+        all_angles[env_mask] = angles.numpy() if torch.is_tensor(angles) else angles
+        current_wps_idx[env_mask] = selected_indices
+    
+    # Combine results while maintaining original order
+    poses = list(zip(all_xs_shifted.tolist(), all_ys_shifted.tolist(), all_angles.tolist()))
+    
+    return poses, current_wps_idx
 
 def find_nearest_waypoint(waypoints: torch.Tensor,  # Shape: [M, 2] - M waypoints
                          positions: torch.Tensor, # [N,2] - N environements

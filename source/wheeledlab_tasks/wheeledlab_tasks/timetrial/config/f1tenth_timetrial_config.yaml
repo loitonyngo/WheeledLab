@@ -25,14 +25,16 @@ env_config:
   SIM_DT: 0.00625
   # SIM_DT: 0.003125
   SIM_DECIMATION: 8
-  MIN_DELAY_STEERING: 56 #sim dt steps
-  MAX_DELAY_STEERING: 56
+  MIN_DELAY_STEERING: 24 #sim dt steps
+  MAX_DELAY_STEERING: 24
 
   # PROGRESS_HISTORY_LENGTH: Number of last waypoints to store in the history buffer, every every SIM_DECIMATION*SIM_DT seconds.
   # PROGRESS_HISTORY_CHECKPOINT_IDX: Index of the last checkpoint in the history buffer used to compute the difference in progress
   PROGRESS_HISTORY_LENGTH: 20
   PROGRESS_HISTORY_CHECKPOINT_IDX: 3
 
-  ACTION_HISTORY_LENGTH: 10
-  OBS_HISTORY_LENGTH: 10
-  REW_HISTORY_LENGTH: 10
+  ACTION_HISTORY_LENGTH: 4
+  OBS_HISTORY_LENGTH: 4
+  REW_HISTORY_LENGTH: 4
+
+  COLLISION_RADIUS: 0.3
