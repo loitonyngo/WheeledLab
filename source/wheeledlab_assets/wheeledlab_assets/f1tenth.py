@@ -1,34 +1,38 @@
 import isaaclab.sim as sim_utils
-from isaaclab.actuators import ImplicitActuatorCfg, DCMotorCfg, DelayedImplicitActuatorCfg, DCMotorModCfg, DelayedPDActuatorCfg
+from isaaclab.actuators import ImplicitActuatorCfg, DCMotorCfg, DelayedImplicitActuatorCfg, DelayedPDActuatorCfg, DCMotorModCfg, DelayedPDActuatorCfg
 from isaaclab.assets import ArticulationCfg
 
 from . import WHEELEDLAB_ASSETS_DATA_DIR
+
+import yaml
+with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/timetrial/config/f1tenth_timetrial_config.yaml", "r") as f:
+    CONFIG = yaml.safe_load(f)
 
 # F1Tenth 4WD actuator configuration.
 # For 4WD, all throttle joints (front and back) are active.
 F1TENTH_4WD_ACTUATOR_CFG = {
     "steering_joints": DelayedImplicitActuatorCfg(
         joint_names_expr=["rotator_(left|right)"],
-        velocity_limit=8,    # F1Tenth steering is slightly slower than Hound
+        velocity_limit=0.005,    # F1Tenth steering is slightly slower than Hound
         effort_limit=1.0,
-        stiffness=200.0,
-        damping=0,
+        stiffness=15.0,
+        damping=0.05,
         friction=0.0,
-        min_delay=24,  # Delays depends on physics step size! e.g. if physics step is 0.025s and max_delay is 2, then the delay is 0.2s.
-        max_delay=24), 
+        min_delay=CONFIG['env_config']['MIN_DELAY_STEERING'],  # Delays depends on physics step size! e.g. if physics step is 0.025s and max_delay is 2, then the delay is 0.2s.
+        max_delay=CONFIG['env_config']['MAX_DELAY_STEERING']), #60-68 for dt= 0.025/4, 
 
     "throttle_joints": DCMotorModCfg(
         joint_names_expr=[".*wheel_(back|front)_.*"],  # Matches all throttle joints (e.g. wheel_back_left, wheel_front_right, etc.)
         saturation_effort=1,
-        effort_limit=0.50,  # Adjusted for the 3s VXL-3s motor/ESC
+        effort_limit=0.5,  # Adjusted for the 3s VXL-3s motor/ESC
         velocity_limit=400.0,  # Reduced speed compared to a 4s system
         stiffness=0.0,
-        damping=5.0,
+        damping=100.0,
         friction=0.00,
-        min_delay=8,  # Delays depends on physics step size! e.g. if physics step is 0.025s and max_delay is 2, then the delay is 0.2s.
-        max_delay=8,
-        low_velocity_threshold= 28.0, # [rad/s] Reduced low velocity threshold for 3s system 
-        low_velocity_effort_limit= 0.14,  # Reduced low velocity effort limit for 3s system
+        min_delay=0,  # Delays depends on physics step size! e.g. if physics step is 0.025s and max_delay is 2, then the delay is 0.2s.
+        max_delay=0, # 8-12  for dt= 0.025/4, 
+        low_velocity_threshold= 30.0, # [rad/s] Reduced low velocity threshold for 3s system 
+        low_velocity_effort_limit= 0.15,  # Reduced low velocity effort limit for 3s system
     ),
 }
 
@@ -52,6 +56,8 @@ F1TENTH_CFG = ArticulationCfg(
         usd_path=f"{WHEELEDLAB_ASSETS_DATA_DIR}/Robots/F1TENTH/f1tenth_mod.usd",
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             rigid_body_enabled=True,
+            linear_damping=None,
+            angular_damping=None,
             max_linear_velocity=1000.0,
             max_angular_velocity=100000.0,
             max_depenetration_velocity=100.0,

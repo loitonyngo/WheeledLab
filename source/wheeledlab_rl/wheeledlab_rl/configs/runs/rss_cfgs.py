@@ -1,14 +1,18 @@
 from isaaclab.utils import configclass
+from datetime import datetime
+
 
 from wheeledlab_rl.configs import (
     EnvSetup, RslRlRunConfig, RLTrainConfig, AgentSetup, LogConfig
 )
 
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%")
+
 @configclass
 class RSS_TEST(RslRlRunConfig):
     env_setup = EnvSetup(
         num_envs=64,
-        env_spacing= 50,
+        env_spacing= 20,
         task_name="Isaac-F1TenthTimeTrialRL-v0"
     )
     # unique-jazz-683
@@ -19,7 +23,8 @@ class RSS_TEST(RslRlRunConfig):
         rl_algo_lib="rsl",
         rl_algo_class="ppo",
         log=LogConfig(
-            video_interval=50000
+            video_interval=50000,
+            run_name = 'run_'+timestamp
         ),
     )
     agent_setup = AgentSetup(

@@ -629,3 +629,40 @@ def load_waypoints(waypoints_path):
         for wpnts in waypoint_data['centerline_waypoints']['wpnts']
     ])
     return waypoints, trackbounds, d_lat, psi_rad, kappa_radpm, vx_mps
+
+# def load_waypoints(waypoints_path):
+#     try:
+#         with open(waypoints_path) as f:
+#             waypoint_data = json.load(f)
+#     except (FileNotFoundError, json.JSONDecodeError) as e:
+#         raise ValueError(f"Failed to load waypoints from {waypoints_path}: {str(e)}")
+#         # Extract waypoints from JSON - fixed the extra bracket, shift to match origin
+        
+#     waypoints = np.array([
+#         [wpnts['x_m'], 
+#             wpnts['y_m']] 
+#         for wpnts in waypoint_data['global_traj_wpnts_iqp']['wpnts']
+#     ])
+#     trackbounds = np.array([
+#         [markers['pose']['position']['x'], 
+#             markers['pose']['position']['y']] 
+#         for markers in waypoint_data['trackbounds_markers']['markers']
+#     ])
+#     d_lat = np.array([
+#         [wpnts['d_left'], 
+#             wpnts['d_right']] 
+#         for wpnts in waypoint_data['global_traj_wpnts_iqp']['wpnts']
+#     ])
+#     psi_rad = np.array([
+#         [wpnts['psi_rad']] 
+#         for wpnts in waypoint_data['global_traj_wpnts_iqp']['wpnts']
+#     ])
+#     kappa_radpm = np.array([
+#         [wpnts['kappa_radpm']] 
+#         for wpnts in waypoint_data['global_traj_wpnts_iqp']['wpnts']
+#     ])
+#     vx_mps = np.array([
+#         [wpnts['vx_mps']] 
+#         for wpnts in waypoint_data['global_traj_wpnts_iqp']['wpnts']
+#     ])
+#     return waypoints, trackbounds, d_lat, psi_rad, kappa_radpm, vx_mps

@@ -2,16 +2,37 @@
 env_config:
   MAP_NAME_LIST: ['THETRACK']
   ORIGIN_LIST: [[0, 0], [28, 0], [0, 28], [28, 28]]
-  DYNAMIC_FRICTION: 0.75
-  STATIC_FRICTION: 0.75
+  
+  DYNAMIC_FRICTION: 0.8
+  STATIC_FRICTION: 0.8
+  RESTITUTION: 0.0
 
-  CONSTANT_SPEED: True
+  CONSTANT_SPEED: False
   CONSTANT_SPEED_TARGET: 5
 
-  NON_TRAVERSABLE_TERMINATION: False
+  NON_TRAVERSABLE_TERMINATION: True
   
-  RESET_RANDOM: False
+  RESET_RANDOM: True
 
   MAX_SPEED_SCALING: 10
   MAX_STEERING_SCALING: 0.40
 
+  PLAY_POLICY: True
+
+  # SIM_DT: Physics simulation time step
+  # SIM_DECIMATION: Number of physics steps per simulation step; 
+  # The actions, observations, and rewards are computed every SIM_DECIMATION steps, and every SIM_DECIMATION*SIM_DT seconds.
+  SIM_DT: 0.00625
+  # SIM_DT: 0.003125
+  SIM_DECIMATION: 8
+  MIN_DELAY_STEERING: 56 #sim dt steps
+  MAX_DELAY_STEERING: 56
+
+  # PROGRESS_HISTORY_LENGTH: Number of last waypoints to store in the history buffer, every every SIM_DECIMATION*SIM_DT seconds.
+  # PROGRESS_HISTORY_CHECKPOINT_IDX: Index of the last checkpoint in the history buffer used to compute the difference in progress
+  PROGRESS_HISTORY_LENGTH: 20
+  PROGRESS_HISTORY_CHECKPOINT_IDX: 3
+
+  ACTION_HISTORY_LENGTH: 10
+  OBS_HISTORY_LENGTH: 10
+  REW_HISTORY_LENGTH: 10

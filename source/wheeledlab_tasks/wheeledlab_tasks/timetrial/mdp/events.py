@@ -7,6 +7,9 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.assets import Articulation, RigidObject
 from isaaclab.terrains import TerrainImporter
 from ..utils import find_nearest_waypoint
+import yaml
+with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/timetrial/config/f1tenth_timetrial_config.yaml", "r") as f:
+    CONFIG = yaml.safe_load(f)
 
 def reset_root_state_random(
     env: ManagerBasedEnv,
@@ -61,10 +64,51 @@ def reset_root_state_random(
             device=env.device
         )
 
-    if not hasattr(env, '_history_waypoint_indices'):
-        env._history_length = 10  # Store last 10 waypoints
-        env._history_waypoint_indices = torch.zeros(
-            (env.num_envs, env._history_length), 
+    if not hasattr(env, '_progress_history_indices'):
+        env._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']  # Store last 10 waypoints
+        env._progress_history_indices = torch.zeros(
+            (env.num_envs, env._progress_history_length), 
+            dtype=torch.long,
+            device=env.device
+        )
+    if not hasattr(env, '_action_history_length'):
+        env._action_history_length = CONFIG['env_config']['ACTION_HISTORY_LENGTH']
+
+    if not hasattr(env, '_action_history'):
+        env._action_history = torch.zeros(
+            (env.num_envs, env._action_history_length, 2), 
+            dtype=torch.float32,
+            device=env.device
+        )
+
+    if not hasattr(env, '_obs_history_length'):
+        env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
+
+    if not hasattr(env, '_base_lin_vel_x_history'):
+        env._base_lin_vel_x_history = torch.zeros(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )
+
+    if not hasattr(env, '_base_lin_vel_y_history'):
+        env._base_lin_vel_y_history = torch.zeros(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )
+
+    if not hasattr(env, '_base_ang_vel_z_history'):
+        env._base_ang_vel_z_history = torch.zeros(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )
+
+    if not hasattr(env, '_traversability_history'):
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
+        env._traversability_history = torch.ones(
+            (env.num_envs, env._rew_history_length), 
             dtype=torch.long,
             device=env.device
         )
@@ -72,9 +116,15 @@ def reset_root_state_random(
     # set boolean so that it knows it just resetted
     env._initial_waypoint_indices[env_ids] = current_idx.clone()  
     env._reset_env_bool[env_ids] = torch.ones(len(env_ids), dtype=bool, device=env.device)
-    env._history_waypoint_indices[env_ids, :] =  torch.zeros(env._history_length, dtype=torch.long, device=env.device)
+    env._progress_history_indices[env_ids, :] =  torch.zeros(env._progress_history_length, dtype=torch.long, device=env.device)
+    env._action_history[env_ids, :, :] = torch.zeros((len(env_ids), env._action_history_length, 2), dtype=torch.float32, device=env.device)
 
- 
+    env._base_lin_vel_x_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
+    env._base_lin_vel_y_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
+    env._base_ang_vel_z_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
+
+    env._traversability_history[env_ids, :] = torch.ones((len(env_ids), env._rew_history_length), dtype=torch.long, device=env.device)
+
 def reset_root_state_start_idx(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor,
@@ -128,10 +178,50 @@ def reset_root_state_start_idx(
             device=env.device
         )
 
-    if not hasattr(env, '_history_waypoint_indices'):
-        env._history_length = 10  # Store last 10 waypoints
-        env._history_waypoint_indices = torch.zeros(
-            (env.num_envs, env._history_length), 
+    if not hasattr(env, '_progress_history_indices'):
+        env._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']  # Store last 10 waypoints
+        env._progress_history_indices = torch.zeros(
+            (env.num_envs, env._progress_history_length), 
+            dtype=torch.long,
+            device=env.device
+        )
+
+    if not hasattr(env, '_action_history'):
+        env.action_history_length = CONFIG['env_config']['ACTION_HISTORY_LENGTH']  # Store last 10 waypoints
+        env._action_history = torch.zeros(
+            (env.num_envs, env.action_history_length, 2), 
+            dtype=torch.float32,
+            device=env.device
+        )
+
+    if not hasattr(env, '_obs_history_length'):
+        env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
+        
+    if not hasattr(env, '_base_lin_vel_x_history'):
+        env._base_lin_vel_x_history = torch.zeros(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )
+
+    if not hasattr(env, '_base_lin_vel_y_history'):
+        env._base_lin_vel_y_history = torch.zeros(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )
+
+    if not hasattr(env, '_base_ang_vel_z_history'):
+        env._base_ang_vel_z_history = torch.zeros(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )
+
+    if not hasattr(env, '_traversability_history'):
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
+        env._traversability_history = torch.ones(
+            (env.num_envs, env._rew_history_length), 
             dtype=torch.long,
             device=env.device
         )
@@ -139,6 +229,11 @@ def reset_root_state_start_idx(
     # set boolean so that it knows it just resetted
     env._initial_waypoint_indices[env_ids] = current_idx.clone()  
     env._reset_env_bool[env_ids] = torch.ones(len(env_ids), dtype=bool, device=env.device)
-    env._history_waypoint_indices[env_ids, :] =  torch.zeros(env._history_length, dtype=torch.long, device=env.device)
+    env._progress_history_indices[env_ids, :] =  torch.zeros(env._progress_history_length, dtype=torch.long, device=env.device)
+    env._action_history[env_ids, :, :] = torch.zeros((len(env_ids), env._action_history_length, 2), dtype=torch.float32, device=env.device)
 
- 
+    env._base_lin_vel_x_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
+    env._base_lin_vel_y_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
+    env._base_ang_vel_z_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
+
+    env._traversability_history[env_ids, :] = torch.ones((len(env_ids), env._rew_history_length), dtype=torch.long, device=env.device)

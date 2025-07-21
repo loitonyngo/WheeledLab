@@ -30,14 +30,14 @@ parser = argparse.ArgumentParser(description="Play a policy in WheeledLab.")
 ###### DEFINE POLICY TO PLAY ######
 ###################################
 DEFAULT_LOGS_PATH = "/home/tongo/WheeledLab/source/wheeledlab_rl/logs/"
-POLICY = 'quiet-plasma-1047'
+POLICY = 'misty-cloud-1041'
 SAVE_NAME = 'test'
 SAVE_DIR = '/home/tongo/WheeledLab/source/wheeledlab_rl/logs_play_policy'
 TIMESTAMP = datetime.now().strftime("%m%d_%H%M")
 
 REAL_DATA_DIR = "/home/tongo/WheeledLab/source/wheeledlab_rl/real_data/"
-REAL_DATA_NAME = "speed_3_angle_4.csv"
-# REAL_DATA_NAME = "speed_3_angle_4_n.csv"
+# REAL_DATA_NAME = "bb_speed_3_angle_3_p_2.csv"
+REAL_DATA_NAME = "speed_3_angle_4_n.csv"
 
 REAL_DATA_PATH = os.path.join(REAL_DATA_DIR, REAL_DATA_NAME)
 ###################################
@@ -183,31 +183,19 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     # reset environment
     obs, _ = env.get_observations()
 
-    action_testing = True  # Set to True if you want to test actions manually
+    action_testing = False  # Set to True if you want to test actions manually
     if action_testing:
         
         real_data = pd.read_csv(REAL_DATA_PATH)
 
-        # In your existing code:
         if args_cli.steps > len(real_data):
-            # Create new time vector with desired resolution
-            original_time = torch.tensor(real_data["Time"].values)
-            new_time = torch.linspace(original_time[0], original_time[-1], args_cli.steps+1)
-            
-            # Resample commands
-            cmd_steering = resample_timeseries(
-                original_time,
-                torch.tensor(real_data["cmd_steering_angle"].values),
-                new_time
-            )
-            cmd_velocity = resample_timeseries(
-                original_time,
-                torch.tensor(real_data["cmd_velocity"].values),
-                new_time
-            )
-            time_data = new_time
+            cmd_steering = torch.zeros(args_cli.steps+1, device=env.unwrapped.device)
+            cmd_velocity = torch.zeros(args_cli.steps+1, device=env.unwrapped.device)
+            time_data = torch.zeros(args_cli.steps+1, device=env.unwrapped.device)
+            cmd_steering[:len(real_data["cmd_steering_angle"])] = torch.tensor(real_data["cmd_steering_angle"].values)
+            cmd_velocity[:len(real_data["cmd_velocity"])] = torch.tensor(real_data["cmd_velocity"].values)
+            time_data[:len(real_data["Time"])] = torch.tensor(real_data["Time"].values)
         else:
-            # Original code path
             cmd_steering = torch.tensor(real_data["cmd_steering_angle"].values)
             cmd_velocity = torch.tensor(real_data["cmd_velocity"].values)
             time_data = torch.tensor(real_data["Time"].values)
@@ -703,41 +691,6 @@ def resample_time_series(original_time, original_values, new_time):
     resampled_values = v0 + alpha * (v1 - v0)
     
     return resampled_values
-
-def resample_timeseries(original_time, original_values, new_time):
-    """
-    Resample timeseries data to new time points using linear interpolation
-    Args:
-        original_time: 1D tensor of original timestamps
-        original_values: 1D tensor of original values
-        new_time: 1D tensor of desired timestamps
-    Returns:
-        Resampled values at new_time points
-    """
-    # Ensure we have valid data
-    if len(original_time) == 0 or len(original_values) == 0:
-        return torch.zeros_like(new_time)
-    
-    # Perform linear interpolation
-    resampled = torch.zeros_like(new_time)
-    for i, t in enumerate(new_time):
-        # Find where this time would fit in the original data
-        idx = torch.searchsorted(original_time, t)
-        
-        if idx == 0:
-            # Before first point - extrapolate
-            resampled[i] = original_values[0]
-        elif idx == len(original_time):
-            # After last point - extrapolate
-            resampled[i] = original_values[-1]
-        else:
-            # Linear interpolation between idx-1 and idx
-            t0, t1 = original_time[idx-1], original_time[idx]
-            v0, v1 = original_values[idx-1], original_values[idx]
-            alpha = (t - t0) / (t1 - t0)
-            resampled[i] = v0 + alpha * (v1 - v0)
-    
-    return resampled
 
 if __name__ == "__main__":
     main()

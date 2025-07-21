@@ -53,7 +53,7 @@ from typing import List  # For type hints
 script_dir = Path(__file__).parent
 # Navigate to the config file (go up one level, then into "config")
 config_path = script_dir / "config" / "f1tenth_timetrial_config.yaml"
-with open(config_path, "r") as f:
+with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/timetrial/config/f1tenth_timetrial_config.yaml", "r") as f:
     CONFIG = yaml.safe_load(f)
 
 
@@ -84,6 +84,83 @@ def base_ang_vel_z(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntity
     noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
 
     return asset.data.root_ang_vel_b[:,2].unsqueeze(-1) + noise
+
+def base_lin_vel_x_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
+    """Root linear velocity in the asset's root frame. 2D, only x and y"""
+    # extract the used quantities (to enable type-hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
+    if not hasattr(env, '_base_lin_vel_x_history'):
+        env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
+        env._base_lin_vel_x_history = torch.zeros(
+            (env.num_envs, env._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+            )
+    # shift the history to the right and insert the last angular velocity at the beginning
+    env._base_lin_vel_x_history[:, 1:] = env._base_lin_vel_x_history[:, :-1].clone()
+    env._base_lin_vel_x_history[:, 0] = asset.data.root_lin_vel_b[:,0]
+    base_lin_vel_x_history = env._base_lin_vel_x_history
+    return base_lin_vel_x_history
+
+def base_lin_vel_y_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
+    """Root linear velocity in the asset's root frame. 2D, only x and y"""
+    # extract the used quantities (to enable type-hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
+    if not hasattr(env, '_base_lin_vel_y_history'):
+        env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
+        env._base_lin_vel_y_history = torch.zeros(
+            (env.num_envs, env._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+            )
+    # shift the history to the right and insert the last angular velocity at the beginning
+    env._base_lin_vel_y_history[:, 1:] = env._base_lin_vel_y_history[:, :-1].clone()
+    env._base_lin_vel_y_history[:, 0] = asset.data.root_lin_vel_b[:,1]
+    base_lin_vel_y_history = env._base_lin_vel_y_history
+    return base_lin_vel_y_history
+
+def base_ang_vel_z_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
+    """Root angular velocity in the asset's root frame. Only z, yaw rade"""
+    # extract the used quantities (to enable type-hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
+    if not hasattr(env, '_base_ang_vel_z_history'):
+        env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
+        env._base_ang_vel_z_history = torch.zeros(
+            (env.num_envs, env._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+            )
+    # shift the history to the right and insert the last angular velocity at the beginning
+    env._base_ang_vel_z_history[:, 1:] = env._base_ang_vel_z_history[:, :-1].clone()
+    env._base_ang_vel_z_history[:, 0] = asset.data.root_ang_vel_b[:,2]
+    base_ang_vel_z_history = env._base_ang_vel_z_history
+    
+    return base_ang_vel_z_history
+
+def action_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
+    """Root angular velocity in the asset's root frame. Only z, yaw rade"""
+    # extract the used quantities (to enable type-hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
+    if not hasattr(env, '_action_history'):
+        env._action_history_length = CONFIG['env_config']['ACTION_HISTORY_LENGTH']
+        env._action_history = torch.zeros(
+            (env.num_envs, env._action_history_length, 2),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+            )
+
+    last_action = mdp.last_action(env)[..., :]
+    # Shift the history to the right and insert the last action at the beginning
+    env._action_history[:, 1:, :] = env._action_history[:, :-1, :].clone()
+    env._action_history[:, 0, :] = last_action
+    action_history_obs = env._action_history.reshape(-1, env._action_history_length * 2)  # Flatten the history for observation
+
+    return action_history_obs 
+
 
 def wheel_slip(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
     # extract the used quantities (to enable type-hinting)
@@ -252,7 +329,7 @@ def deviation_centerline_horizon(
         
         # Signed deviations and store in output
         signed_deviations = signs * distances
-        norm_distance = 10
+        norm_distance = 1
         deviations[env_mask] = signed_deviations / norm_distance
 
     return deviations
@@ -261,7 +338,7 @@ def heading_error_horizon(
     env: ManagerBasedEnv, 
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     lookahead: int = 10,
-    horizon: int = 5
+    horizon: int = 1
 ) -> torch.Tensor:
     """
     Calculate heading errors between car's current orientation and multiple lookahead waypoints,
@@ -345,7 +422,7 @@ def heading_error_horizon(
         )
         
         # Store results in the output tensor
-        norm_heading_errors = np.pi
+        norm_heading_errors = 1
         heading_errors[env_mask] = current_heading_errors / norm_heading_errors
 
     return heading_errors
@@ -428,7 +505,7 @@ def d_lat_horizon(
         next_d_lat_horizon = d_lat[next_idx_horizon, :]
         
         # Normalize and reshape to [num_envs_in_map, horizon * 2]
-        norm_d_lat = 2
+        norm_d_lat = 1
         norm_next_d_lat_horizon = next_d_lat_horizon.reshape(-1, horizon * 2) / norm_d_lat
         
         # Store results in the output tensor
@@ -515,16 +592,100 @@ def kappa_radpm_horizon(
         next_kappa_radpm_horizon = kappa_radpm[next_idx_horizon].squeeze(-1)
         
         # Normalize and store results
-        norm_kappa_radpm = 3
+        norm_kappa_radpm = 1
         kappa_results[env_mask] = next_kappa_radpm_horizon / norm_kappa_radpm
 
     return kappa_results
 
+def delta_psi_rad_horizon(
+    env: ManagerBasedEnv, 
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    lookahead: int = 10,
+    horizon: int = 5
+) -> torch.Tensor:
+    """
+    Calculate curvature (kappa) values for horizon points, supporting multiple maps.
+    
+    Args:
+        env: The environment instance
+        asset_cfg: Configuration for the robot asset
+        lookahead: Base number of waypoints to look ahead
+        horizon: Number of lookahead points to return
+        
+    Returns:
+        Tensor of normalized curvature values (shape: [num_envs, horizon])
+    """
+
+    asset = env.scene[asset_cfg.name]
+    pos_xy_world = mdp.root_pos_w(env)[..., :2]
+    num_envs = pos_xy_world.shape[0]
+
+    if not hasattr(env, '_map_levels'):
+        env._map_levels = torch.zeros(env.num_envs, 
+                                dtype=torch.long,
+                                device=env.device)
+        
+    # Get map levels for all environments
+    map_levels = env._map_levels  # shape: [num_envs]
+    unique_map_levels = torch.unique(map_levels)
+    
+    # Initialize output tensor
+    kappa_results = torch.zeros(num_envs, horizon, device=env.device)
+    
+    # Process each map level separately
+    for map_level in unique_map_levels:
+        # Create mask for environments using this map
+        env_mask = (map_levels == map_level)
+        num_envs_in_map = env_mask.sum()
+        
+        if num_envs_in_map == 0:
+            continue
+            
+        # Get positions for these environments
+        map_positions = pos_xy_world[env_mask]
+        
+        # Get waypoints and track data for this map level
+        waypoints_xy_world = torch.tensor(
+            env.scene.terrain.cfg.waypoints_list[map_level],
+            device=env.device,
+            dtype=torch.float32
+        )[:, :2]
+        
+        inner_xy_world = torch.tensor(
+            env.scene.terrain.cfg.inner_list[map_level],
+            device=env.device,
+            dtype=torch.float32
+        )[:, :2]
+
+        psi_rad = torch.tensor(
+            env.scene.terrain.cfg.psi_rad_list[map_level],
+            device=env.device,
+            dtype=torch.float32
+        )
+
+        # Find nearest waypoint for these environments
+        current_idx, _ = find_nearest_waypoint(inner_xy_world, map_positions)  # shape: [num_envs_in_map]
+        
+        # Create lookahead indices
+        steps = torch.linspace(0, lookahead * horizon, horizon + 1, device=env.device)
+        horizon_indices = (current_idx.unsqueeze(-1) + steps.unsqueeze(0)) % len(waypoints_xy_world)
+        horizon_indices = horizon_indices.long()
+
+        segment_starts = waypoints_xy_world[horizon_indices[:, :-1]]
+        segment_ends = waypoints_xy_world[horizon_indices[:, 1:]]
+        
+        delta_psi_rad = (psi_rad[horizon_indices[:, 1:]] - psi_rad[horizon_indices[:, :-1]]).squeeze(-1)
+                
+        # Normalize and store results
+        norm_psi_rad = 1
+        delta_psi_rad[env_mask] = delta_psi_rad / norm_psi_rad
+
+    return delta_psi_rad
 ##########################
 # Variables for observation space. Better way to implement it?
 
-HORIZON = 10
-LOOKAHEAD = 15
+N_STEP_LOOKAHEAD = 20
+STEP_LOOKAHEAD = 10 
 ##########################
 
 @configclass
@@ -536,70 +697,79 @@ class F1TenthTimeTrialObsCfg:
         [vx, vy, vz, wx, wy, wz, action1(vel), action2(steering)]
         """
         # lidar = ObsTerm(func=mdp_sensors.lidar_ranges, params={"sensor_cfg":SceneEntityCfg("lidar")})
-        base_lin_vel_x = ObsTerm(
-            func=base_lin_vel_x, 
+        base_lin_vel_x_history = ObsTerm(
+            func=base_lin_vel_x_history, 
             params={'mean_noise': 0,
                     'std_noise': 0}            
             )
 
-        base_lin_vel_y = ObsTerm(
-            func=base_lin_vel_y, 
+        base_lin_vel_y_history = ObsTerm(
+            func=base_lin_vel_y_history, 
             params={'mean_noise': 0,
                     'std_noise': 0}            
             )
                 
-        base_ang_vel_z = ObsTerm(
-            func=base_ang_vel_z, 
+        base_ang_vel_z_history = ObsTerm(
+            func=base_ang_vel_z_history, 
             params={'mean_noise': 0,
                     'std_noise': 0}         
             )
         
-        last_action = ObsTerm(
-            func=mdp.last_action,
-            clip=(-1., 1.), # TODO: get from ClipAction wrapper
-            noise=Unoise(n_min=-.0, n_max=.0, operation='add')
-        )
-
-        wheel_slip = ObsTerm(
-            func=wheel_slip,
-            params={'mean_noise': 0,
-                    'std_noise': 0}      
-            )
-
-        wheel_slip_2 = ObsTerm(
-            func=wheel_slip_2,
-            params={'mean_noise': 0,
-                    'std_noise': 0}      
-            )
+        # last_action = ObsTerm(
+        #     func=mdp.last_action,
+        #     clip=(-1., 1.), # TODO: get from ClipAction wrapper
+        #     noise=Unoise(n_min=-.0, n_max=.0, operation='add')
+        # )
         
-        wheel_slip_3 = ObsTerm(
-            func=wheel_slip_3,
-            params={'mean_noise': 0,
-                    'std_noise': 0}      
-            )
+        action_history = ObsTerm(
+            func=action_history,
+        )
+        # wheel_slip = ObsTerm(
+        #     func=wheel_slip,
+        #     params={'mean_noise': 0,
+        #             'std_noise': 0}      
+        #     )
+
+        # wheel_slip_2 = ObsTerm(
+        #     func=wheel_slip_2,
+        #     params={'mean_noise': 0,
+        #             'std_noise': 0}      
+        #     )
+        
+        # wheel_slip_3 = ObsTerm(
+        #     func=wheel_slip_3,
+        #     params={'mean_noise': 0,
+        #             'std_noise': 0}      
+        #     )
                 
         heading_error = ObsTerm(
             func=heading_error_horizon,
-            params={'lookahead': LOOKAHEAD,
-                    'horizon': HORIZON}
+            params={'lookahead': STEP_LOOKAHEAD,
+                    'horizon': N_STEP_LOOKAHEAD}
         )
         deviation_error = ObsTerm(
             func=deviation_centerline_horizon,
-            params={'lookahead': LOOKAHEAD,
-                    'horizon': HORIZON}
+            params={'lookahead': STEP_LOOKAHEAD,
+                    'horizon': N_STEP_LOOKAHEAD}
         )
         d_lat_horizon = ObsTerm(
             func=d_lat_horizon,
-            params={'lookahead': LOOKAHEAD,
-                    'horizon': HORIZON}
+            params={'lookahead': STEP_LOOKAHEAD,
+                    'horizon': N_STEP_LOOKAHEAD}
         )
         #only one env gives problem
         kappa_radpm_horizon = ObsTerm(
             func=kappa_radpm_horizon,
-            params={'lookahead': LOOKAHEAD,
-                    'horizon': HORIZON}
+            params={'lookahead': STEP_LOOKAHEAD,
+                    'horizon': N_STEP_LOOKAHEAD}
         )
- 
+
+        # delta_psi_rad_horizon = ObsTerm(
+        #     func=delta_psi_rad_horizon,
+        #     params={'lookahead': STEP_LOOKAHEAD,
+        #             'horizon': N_STEP_LOOKAHEAD}
+        # )
+
         def __post_init__(self) -> None:
             self.enable_corruption = False
             self.concatenate_terms = True
@@ -620,6 +790,7 @@ class InitialPoseCfg:
 ##############################
 DYNAMIC_FRICTION = CONFIG['env_config']['DYNAMIC_FRICTION']
 STATIC_FRICTION = CONFIG['env_config']['STATIC_FRICTION']
+RESTITUTION = CONFIG['env_config']['RESTITUTION']
 
 @configclass
 class F1TenthTimeTrialTerrainImporterCfg(TerrainImporterCfg):
@@ -652,9 +823,10 @@ class F1TenthTimeTrialTerrainImporterCfg(TerrainImporterCfg):
     collision_group = -1
     physics_material = sim_utils.RigidBodyMaterialCfg(
         friction_combine_mode="multiply",
-        restitution_combine_mode="multiply",
+        restitution_combine_mode="max",
         static_friction=STATIC_FRICTION,
         dynamic_friction=DYNAMIC_FRICTION,
+        restitution=RESTITUTION
     )
     debug_vis = True
     
@@ -887,6 +1059,7 @@ def out_of_track_penalty(env):
                                 device=env.device)
     map_levels = env._map_levels
     traversability = TraversabilityHashmapUtil().get_traversability(poses, map_levels)
+
     return torch.where(traversability, 0., -1.)
 
 def upright_penalty(env, thresh_deg):
@@ -914,16 +1087,27 @@ def forward_vel(env):
     return mdp.base_lin_vel(env)[:, 0]
 
 def progress_rew(env):
-    """Reward +1 for passing each new waypoint, handling lap transitions."""
+    """Reward for passing each new waypoint, handling lap transitions."""
     progress_bool, progress = progress_waypoint_bool(env)
-    return torch.where(progress_bool, progress*0.1, 0.0)
+
+    if not hasattr(env, '_traversability_history'):
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
+        env._traversability_history = torch.ones(
+            (env.num_envs, env._rew_history_length), 
+            dtype=torch.long,
+            device=env.device
+        )
+    no_off_track = env._traversability_history.min(dim=1).values == 1
+
+    return torch.where(progress_bool & no_off_track, progress*0.1, 0.0)
 
 def progress_waypoint_bool(env):
     # Initialize buffer if first run
-    if not hasattr(env, '_history_waypoint_indices'):
-        env._history_length = 10  # Store last 10 waypoints
-        env._history_waypoint_indices = torch.zeros(
-            (env.num_envs, env._history_length), 
+    if not hasattr(env, '_progress_history_indices'):
+        env._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']  # Store last 10 waypoints
+
+        env._progress_history_indices = torch.zeros(
+            (env.num_envs, env._progress_history_length), 
             dtype=torch.long,
             device=env.device
         )
@@ -932,7 +1116,9 @@ def progress_waypoint_bool(env):
             dtype=torch.bool,
             device=env.device
         )
-    
+    if not hasattr(env, '_progress_history_checkpoint_idx'):
+        env._progress_history_checkpoint_idx = CONFIG['env_config']['PROGRESS_HISTORY_CHECKPOINT_IDX']
+
     # Get current positions and map levels
     position_xy_world = mdp.root_pos_w(env)[..., :2]
     if not hasattr(env, '_map_levels'):
@@ -974,19 +1160,21 @@ def progress_waypoint_bool(env):
         # current_indices[env_mask] = current_idx
         
         # Update history for these environments
-        env._history_waypoint_indices[env_mask, 1:] = env._history_waypoint_indices[env_mask, :-1].clone()
-        env._history_waypoint_indices[env_mask, 0] = current_idx
+        env._progress_history_indices[env_mask, 1:] = env._progress_history_indices[env_mask, :-1].clone()
+        env._progress_history_indices[env_mask, 0] = current_idx
         
         # Calculate progress
-        current_progress = (current_idx - env._history_waypoint_indices[env_mask, 1]) % num_waypoints
+        current_progress = (current_idx - env._progress_history_indices[env_mask, env._progress_history_checkpoint_idx]) % num_waypoints
         progress[env_mask] = current_progress
         
         # Calculate progress bool
-        progress_bool[env_mask] = (current_progress > 0) & (current_progress <= 20) & (env._reset_env_bool[env_mask] == False)
+        progress_bool[env_mask] = (current_progress > 0) & (current_progress <= 30) & (env._reset_env_bool[env_mask] == False)
     
     # Reset flags
     env._reset_env_bool = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
     
+
+
     ###########################
     # Store extras (using first map's waypoints count for simplicity), only necessary when you play policy, find a better way to implement it
     # env.extras['inner'] =  torch.tensor(env.scene.terrain.cfg.inner_list[map_level][current_idx], device=env.device)
@@ -1020,15 +1208,15 @@ class F1TenthTimeTrialRewardsCfg:
     # Set "weight" to 0 to deactivate a reward term
 
     # Penalty if the car goes off-track (it would be crashing on the walls), weight=1
-    # out_of_track = RewTerm(
-    #     func=out_of_track_penalty,
-    #     weight=1,
-    # )
+    out_of_track = RewTerm(
+        func=out_of_track_penalty,
+        weight=1,
+    )
 
     # Standard reward for progressing along centerline, weight=1
     progress_rew = RewTerm(
         func=progress_rew,
-        weight=0.0000001,
+        weight=1,
     )
 
     if CONFIG['env_config']['CONSTANT_SPEED']:
@@ -1106,11 +1294,24 @@ def is_not_traversable(env):
     map_levels = env._map_levels
     traversability = TraversabilityHashmapUtil().get_traversability(poses, map_levels)
     num_episodes = env.common_step_counter // env.max_episode_length
-    # delay the termination for the first 10 episodes
-    # if num_episodes < 10:
+#   delay the termination for the first 10 episodes
+    # if num_episodes < 50:
+    #     # return false (IS traversable)
     #     return torch.zeros(env.num_envs, device=env.device) == 1
     
-    return torch.logical_not(traversability)
+    if not hasattr(env, '_traversability_history'):
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
+        env._traversability_history = torch.ones(
+            (env.num_envs, env._rew_history_length), 
+            dtype=torch.long,
+            device=env.device
+        )
+    
+    env._traversability_history[:, 1:] = env._traversability_history[:, :-1].clone()
+    env._traversability_history[:, 0] = traversability
+    delayed_traversability = env._traversability_history[:,-1]
+
+    return torch.logical_not(delayed_traversability)
 
 def is_reverse(env):
     reverse = reverse_waypoint_bool(env)
@@ -1118,8 +1319,8 @@ def is_reverse(env):
 
 def reverse_waypoint_bool(env):
     # Safe access to buffer with fallback
-    if not hasattr(env, '_history_waypoint_indices'):
-        env._history_waypoint_indices = torch.zeros(env.num_envs, 
+    if not hasattr(env, '_progress_history_indices'):
+        env._progress_history_indices = torch.zeros(env.num_envs, 
                                                dtype=torch.long,
                                                device=env.device)
         
@@ -1145,13 +1346,13 @@ def reverse_waypoint_bool(env):
     # Handle lap transitions by checking modulo distance
     num_waypoints = len(waypoints)
 
-    progress = current_idx - env._history_waypoint_indices
+    progress = current_idx - env._progress_history_indices
     
     # Consider progress if moved forward (even across lap boundary)
     reverse_bool = progress < 0
     
     # Update stored indices
-    env._history_waypoint_indices = current_idx.clone()
+    env._progress_history_indices = current_idx.clone()
     
     return reverse_bool
 
@@ -1218,8 +1419,10 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
         # viewer settings
         self.viewer.eye = [0., 0.0, 35.0] 
         self.viewer.lookat = [0.0, 0.0, -3.]
-        self.sim.dt = 0.025/4
-        self.decimation = 4
+        self.sim.dt = CONFIG['env_config']['SIM_DT']
+        self.decimation = CONFIG['env_config']['SIM_DECIMATION']
+        # self.sim.dt = 0.025/2
+        # self.decimation = 2
         # self.sim.render_interval = self.decimation
         self.sim.render_interval = self.decimation
 
@@ -1280,9 +1483,10 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
             origin_list=ORIGIN_LIST,
             physics_material=sim_utils.RigidBodyMaterialCfg(
                 friction_combine_mode="multiply",
-                restitution_combine_mode="multiply",
+                restitution_combine_mode="max",
                 static_friction=STATIC_FRICTION,
                 dynamic_friction=DYNAMIC_FRICTION,
+                restitution=RESTITUTION
             ),
             debug_vis=True,
         )
@@ -1310,12 +1514,48 @@ class F1TenthTimeTrialEnv(ManagerBasedEnv):
                                                 device=self.device)
 
         # Save history of last #history_length waypoints idx
-        self._history_length = 10
-        self._history_waypoint_indices = torch.zeros(
-            (self.num_envs, self._history_length),  # Shape: (num_envs, history_length)
+        self._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']
+        self._progress_history_checkpoint_idx = CONFIG['env_config']['PROGRESS_HISTORY_CHECKPOINT_IDX']
+
+        self._progress_history_indices = torch.zeros(
+            (self.num_envs, self._progress_history_length),  # Shape: (num_envs, history_length)
             dtype=torch.long,
             device=self.device
         )
+
+        self._action_history_length = CONFIG['env_config']['ACTION_HISTORY_LENGTH']
+        self._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
+        self._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
+
+        self._action_history = torch.zeros(
+            (self.num_envs, self._action_history_length, 2),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=self.device
+        )
+
+        self._base_lin_vel_x_history = torch.zeros(
+            (self.num_envs, self._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=self.device
+        )
+        self._base_lin_vel_y_history = torch.zeros(
+            (self.num_envs, self._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=self.device
+        )
+        self._base_ang_vel_z_history = torch.zeros(
+            (self.num_envs, self._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=self.device
+        )
+
+        self._traversability_history = torch.ones(
+            (self.num_envs, self._rew_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.long,
+            device=self.device
+        )
+        
+
 
         # Bool to determine if the car has just reset; it is set to True when a new pose is generated, and afterwards immediately set to false 
         self._reset_env_bool = torch.zeros(  # Tracks where to insert the next index
@@ -1344,13 +1584,23 @@ class F1TenthTimeTrialRLRandomEnvCfg(F1TenthTimeTrialRLEnvCfg):
 @configclass
 class F1TenthTimeTrialPlayEnvCfg(F1TenthTimeTrialRLEnvCfg):
     """no terminations"""
+  
 
-    events: F1TenthTimeTrialEventsCfg = F1TenthTimeTrialEventsRandomCfg(
-        reset_root_state_start_idx = EventTerm(
-            func=reset_root_state_start_idx,
-            mode="reset",
+    # on startup
+    if CONFIG['env_config']['RESET_RANDOM']:
+        events: F1TenthTimeTrialEventsCfg = F1TenthTimeTrialEventsRandomCfg(
+            reset_root_state_random = EventTerm(
+                func=reset_root_state_random,
+                mode="reset",
+            )
         )
-    )
+    else:
+        events: F1TenthTimeTrialEventsCfg = F1TenthTimeTrialEventsRandomCfg(
+            reset_root_state_start_idx = EventTerm(
+                func=reset_root_state_start_idx,
+                mode="reset",
+            )
+        )
 
     rewards: F1TenthTimeTrialRewardsCfg = None
     terminations: F1TenthTimeTrialTerminationsCfg = None

@@ -6,7 +6,7 @@ class F1TenthPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     # Training hyperparameters (adjust as needed)
     num_steps_per_env = 128
     max_iterations = 1500
-    save_interval = 25
+    save_interval = 50
     experiment_name = "ppo_f1tenth"
     empirical_normalization = False  # Disable if using proprioceptive-only obs
 
