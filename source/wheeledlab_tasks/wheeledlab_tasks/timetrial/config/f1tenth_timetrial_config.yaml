@@ -16,6 +16,8 @@ env_config:
 
   MAX_SPEED_SCALING: 10
   MAX_STEERING_SCALING: 0.40
+  SPEED_OFFSET: 0.5
+  STEERING_OFFSET: 0.0
 
   PLAY_POLICY: True
 
@@ -23,6 +25,7 @@ env_config:
   # SIM_DECIMATION: Number of physics steps per simulation step; 
   # The actions, observations, and rewards are computed every SIM_DECIMATION steps, and every SIM_DECIMATION*SIM_DT seconds.
   SIM_DT: 0.00625
+  LEN_S_IDX: 0.1 
   # SIM_DT: 0.003125
   SIM_DECIMATION: 8
   MIN_DELAY_STEERING: 24 #sim dt steps
@@ -37,4 +40,17 @@ env_config:
   OBS_HISTORY_LENGTH: 4
   REW_HISTORY_LENGTH: 4
 
-  COLLISION_RADIUS: 0.3
+  WALL_COLLISION_RADIUS: 0.25
+  OPP_COLLISION_RADIUS: 0.4
+  
+  MAX_PROGRESS_IDX: 30 
+  OPPONENT_DETECTION_IDX: 80
+  OPPONENT_FAR_AWAY_IDX: 120
+  IGNORE_OPPONENT_EP: 10000
+
+  # True if lookahed changes with current velocity
+  DYNAMIC_LOOKAHEAD: False
+  T_HORIZON: 5
+  # Otherwise use constant idx steps (s_horizon = delta_s_idx [0.1m/idx] * N_horizon_idx [idx])
+  DELTA_S_IDX: 10
+  N_HORIZON: 20

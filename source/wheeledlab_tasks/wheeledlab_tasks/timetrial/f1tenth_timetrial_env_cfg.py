@@ -15,7 +15,7 @@ from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 import isaaclab.utils.math as math_utils
-from isaaclab.assets import ArticulationCfg, RigidObject, AssetBaseCfg
+from isaaclab.assets import ArticulationCfg, RigidObject, RigidObjectCfg, AssetBaseCfg
 from isaaclab.managers import (
     EventTermCfg as EventTerm,
     RewardTermCfg as RewTerm,
@@ -35,14 +35,15 @@ from isaaclab.envs import ManagerBasedRLEnvCfg
 from wheeledlab.envs.mdp import increase_reward_weight_over_time
 from wheeledlab_assets import WHEELEDLAB_ASSETS_DATA_DIR
 from wheeledlab_assets.mushr import MUSHR_SUS_CFG
-from wheeledlab_assets.f1tenth import F1TENTH_CFG, LB_CFG
+from wheeledlab_assets.f1tenth import F1TENTH_CFG, OPPONENT_CFG, LB_CFG
 from wheeledlab_tasks.common import Mushr4WDActionCfg
 from wheeledlab_tasks.common import F1Tenth4WDActionCfg, LB4WDActionCfg
 from .disable_lidar import disable_all_lidars
 
 from .utils import create_maps_from_waypoints, generate_random_poses, generate_random_poses_from_list, generate_start_idx_poses_from_list, generate_random_poses_from_waypoints, TraversabilityHashmapUtil, find_nearest_waypoint 
 from . import mdp_sensors
-from .mdp import reset_root_state_random, reset_root_state_start_idx
+from .mdp import reset_root_state_random, reset_root_state_random_opponent, reset_root_state_start_idx
+
 
 import omni.usd
 
@@ -242,8 +243,9 @@ def quat_rotate_inverse(q, v):
 def deviation_centerline_horizon(
     env: ManagerBasedEnv, 
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    lookahead: int = 10,
-    horizon: int = 5
+    delta_s_idx: int = 10,
+    n_horizon: int = 5,
+    t_horizon: int = 5
 ) -> torch.Tensor:
     """
     Calculate signed lateral deviations from multiple reference waypoint segments.
@@ -251,17 +253,18 @@ def deviation_centerline_horizon(
     Args:
         env: The environment instance
         asset_cfg: Configuration for the robot asset
-        lookahead: Base number of waypoints to look ahead
-        horizon: Number of lookahead points to return
+        delta_s_idx: Base number of waypoints to look ahead
+        n_horizon: Number of delta_s_idx points to return
         
     Returns:
         Tensor of signed deviations (positive = left of reference, negative = right)
-        for each horizon segment. Shape: [num_envs, horizon]
+        for each n_horizon segment. Shape: [num_envs, n_horizon]
     """
     # Get current state
     asset = env.scene[asset_cfg.name]
     pos_xy_world = mdp.root_pos_w(env)[..., :2]
-    
+    vel_x = mdp.base_lin_vel(env)[..., 0]
+
     num_envs = pos_xy_world.shape[0]
     
     if not hasattr(env, '_map_levels'):
@@ -274,7 +277,7 @@ def deviation_centerline_horizon(
     unique_map_levels = torch.unique(map_levels)
     
     # Initialize output tensor
-    deviations = torch.zeros(num_envs, horizon, device=env.device)
+    deviations = torch.zeros(num_envs, n_horizon, device=env.device)
     
     # Process each map level separately
     for map_level in unique_map_levels:
@@ -287,7 +290,8 @@ def deviation_centerline_horizon(
             
         # Get positions for these environments
         map_positions = pos_xy_world[env_mask]
-        
+        map_vel_x     = vel_x[env_mask]
+
         # Get waypoints for this map level
         waypoints_xy_world = torch.tensor(
             env.scene.terrain.cfg.waypoints_list[map_level],
@@ -303,27 +307,40 @@ def deviation_centerline_horizon(
         # Find nearest waypoint for these environments
         current_idx, _ = find_nearest_waypoint(inner_xy_world, map_positions)  # shape: [num_envs_in_map]
         
-        # Create horizon indices [num_envs_in_map, horizon + 1]
-        steps = torch.linspace(0, lookahead * horizon, horizon + 1, device=env.device)
-        horizon_indices = (current_idx.unsqueeze(-1) + steps.unsqueeze(0)) % len(waypoints_xy_world)
-        horizon_indices = horizon_indices.long()
-        
-        # Get waypoint pairs for each segment [num_envs_in_map, horizon, 2, 2]
+        if CONFIG['env_config']['DYNAMIC_LOOKAHEAD']:
+            
+            s_length  = 0.1 # [m]
+            s_horizon = map_vel_x * t_horizon 
+            idx_horizon = s_horizon/s_length
+
+            horizon_indices = calculate_horizon_indices(
+                current_idx=current_idx,
+                idx_horizon=idx_horizon,
+                waypoints_length=len(waypoints_xy_world),
+                n_horizon=n_horizon,
+                device=env.device
+            )
+        else:
+            lookahead_steps = torch.linspace(0, delta_s_idx*n_horizon, n_horizon+1, device=env.device)
+            horizon_indices = (current_idx.unsqueeze(-1) + lookahead_steps.unsqueeze(0)) % len(waypoints_xy_world)
+            horizon_indices = horizon_indices.long()
+
+        # Get waypoint pairs for each segment [num_envs_in_map, n_horizon, 2, 2]
         segment_starts = waypoints_xy_world[horizon_indices[:, :-1]]
         segment_ends = waypoints_xy_world[horizon_indices[:, 1:]]
         
-        # Calculate track directions [num_envs_in_map, horizon, 2]
+        # Calculate track directions [num_envs_in_map, n_horizon, 2]
         track_dirs = segment_ends - segment_starts
         
-        # Calculate car offsets [num_envs_in_map, horizon, 2]
+        # Calculate car offsets [num_envs_in_map, n_horizon, 2]
         car_offsets = map_positions.unsqueeze(1) - segment_starts
         
-        # Cross products (track_dir × car_offset) [num_envs_in_map, horizon]
+        # Cross products (track_dir × car_offset) [num_envs_in_map, n_horizon]
         cross_products = (track_dirs[:, :, 0] * car_offsets[:, :, 1] - 
                          track_dirs[:, :, 1] * car_offsets[:, :, 0])
         signs = torch.sign(cross_products)
         
-        # Perpendicular distances [num_envs_in_map, horizon]
+        # Perpendicular distances [num_envs_in_map, n_horizon]
         segment_lengths = torch.norm(track_dirs, dim=2)
         distances = torch.abs(cross_products) / (segment_lengths + 1e-6)
         
@@ -337,26 +354,29 @@ def deviation_centerline_horizon(
 def heading_error_horizon(
     env: ManagerBasedEnv, 
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    lookahead: int = 10,
-    horizon: int = 1
+    delta_s_idx: int = 10,
+    n_horizon: int = 5,
+    t_horizon: int = 5
 ) -> torch.Tensor:
     """
-    Calculate heading errors between car's current orientation and multiple lookahead waypoints,
+    Calculate heading errors between car's current orientation and multiple delta_s_idx waypoints,
     supporting multiple maps through env._map_levels.
     
     Args:
         env: The environment instance
         asset_cfg: Configuration for the robot asset
-        lookahead: Base number of waypoints to look ahead
-        horizon: Number of lookahead points to return
+        delta_s_idx: Base number of waypoints to look ahead
+        n_horizon: Number of delta_s_idx points to return
         
     Returns:
-        Tensor of heading errors in radians (range [-π, π]) for each horizon point.
-        Shape: [num_envs, horizon]
+        Tensor of heading errors in radians (range [-π, π]) for each n_horizon point.
+        Shape: [num_envs, n_horizon]
     """
     # Get current state
     asset = env.scene[asset_cfg.name]
     pos_xy_world = mdp.root_pos_w(env)[..., :2]
+    vel_x = mdp.base_lin_vel(env)[..., 0]
+
     heading_w = asset.data.heading_w
     num_envs = pos_xy_world.shape[0]
 
@@ -370,7 +390,7 @@ def heading_error_horizon(
     unique_map_levels = torch.unique(map_levels)
     
     # Initialize output tensor
-    heading_errors = torch.zeros(num_envs, horizon, device=env.device)
+    heading_errors = torch.zeros(num_envs, n_horizon, device=env.device)
     
     # Process each map level separately
     for map_level in unique_map_levels:
@@ -383,6 +403,7 @@ def heading_error_horizon(
             
         # Get positions and headings for these environments
         map_positions = pos_xy_world[env_mask]
+        map_vel_x    = vel_x[env_mask]
         map_headings = heading_w[env_mask]
         
         # Get waypoints for this map level
@@ -401,21 +422,35 @@ def heading_error_horizon(
         # Find nearest waypoint for these environments
         current_idx, _ = find_nearest_waypoint(inner_xy_world, map_positions)  # shape: [num_envs_in_map]
         
-        # Create lookahead indices for these environments
-        lookahead_steps = torch.linspace(lookahead, lookahead*horizon, horizon, device=env.device)
-        horizon_indices = (current_idx.unsqueeze(-1) + lookahead_steps.unsqueeze(0)) % len(waypoints_xy_world)
-        horizon_indices = horizon_indices.long()
+        if CONFIG['env_config']['DYNAMIC_LOOKAHEAD']:
+            
+            s_length  = 0.1 # [m]
+            s_horizon = map_vel_x * t_horizon 
+            idx_horizon = s_horizon/s_length
+
+            horizon_indices = calculate_horizon_indices(
+                current_idx=current_idx,
+                idx_horizon=idx_horizon,
+                waypoints_length=len(waypoints_xy_world),
+                n_horizon=n_horizon,
+                device=env.device
+            )
+        else:
+            lookahead_steps = torch.linspace(0, delta_s_idx*n_horizon, n_horizon+1, device=env.device)
+            horizon_indices = (current_idx.unsqueeze(-1) + lookahead_steps.unsqueeze(0)) % len(waypoints_xy_world)
+            horizon_indices = horizon_indices.long()
+
+
+        # Get delta_s_idx waypoints [num_envs_in_map, n_horizon, 2]
+        lookahead_points = waypoints_xy_world[horizon_indices[:, 1:]]
         
-        # Get lookahead waypoints [num_envs_in_map, horizon, 2]
-        lookahead_points = waypoints_xy_world[horizon_indices]
-        
-        # Calculate desired heading vectors [num_envs_in_map, horizon]
+        # Calculate desired heading vectors [num_envs_in_map, n_horizon]
         desired_headings = torch.atan2(
             lookahead_points[:, :, 1] - map_positions[:, 1].unsqueeze(-1),
             lookahead_points[:, :, 0] - map_positions[:, 0].unsqueeze(-1)
         )
         
-        # Calculate smallest angle differences [num_envs_in_map, horizon]
+        # Calculate smallest angle differences [num_envs_in_map, n_horizon]
         current_heading_errors = torch.atan2(
             torch.sin(desired_headings - map_headings.unsqueeze(-1)),
             torch.cos(desired_headings - map_headings.unsqueeze(-1))
@@ -430,8 +465,9 @@ def heading_error_horizon(
 def d_lat_horizon(
     env: ManagerBasedEnv, 
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    lookahead: int = 10,
-    horizon: int = 5
+    delta_s_idx: int = 10,
+    n_horizon: int = 5,
+    t_horizon: int = 5
 ) -> torch.Tensor:
     """
     Calculate normalized lateral space from centerline to trackbounds, supporting multiple maps.
@@ -439,15 +475,17 @@ def d_lat_horizon(
     Args:
         env: The environment instance
         asset_cfg: Configuration for the robot asset
-        lookahead: Base number of waypoints to look ahead
-        horizon: Number of lookahead points to return
+        delta_s_idx: Base number of waypoints to look ahead
+        n_horizon: Number of delta_s_idx points to return
         
     Returns:
-        Tensor of normalized lateral space (shape: [num_envs, horizon * 2])
+        Tensor of normalized lateral space (shape: [num_envs, n_horizon * 2])
     """
     # Get current state
     asset = env.scene[asset_cfg.name]
     pos_xy_world = mdp.root_pos_w(env)[..., :2]
+    vel_x = mdp.base_lin_vel(env)[..., 0]
+
     num_envs = pos_xy_world.shape[0]
 
     if not hasattr(env, '_map_levels'):
@@ -459,8 +497,8 @@ def d_lat_horizon(
     map_levels = env._map_levels  # shape: [num_envs]
     unique_map_levels = torch.unique(map_levels)
     
-    # Initialize output tensor (horizon * 2 for left/right bounds at each point)
-    d_lat_results = torch.zeros(num_envs, horizon * 2, device=env.device)
+    # Initialize output tensor (n_horizon * 2 for left/right bounds at each point)
+    d_lat_results = torch.zeros(num_envs, n_horizon * 2, device=env.device)
     
     # Process each map level separately
     for map_level in unique_map_levels:
@@ -473,7 +511,7 @@ def d_lat_horizon(
             
         # Get positions for these environments, shift by origin env
         map_positions = pos_xy_world[env_mask]
-        
+        map_vel_x     = vel_x[env_mask]
         # Get waypoints and track bounds for this map level
         waypoints_xy_world = torch.tensor(
             env.scene.terrain.cfg.waypoints_list[map_level],
@@ -496,17 +534,30 @@ def d_lat_horizon(
         # Find nearest waypoint for these environments
         current_idx, _ = find_nearest_waypoint(inner_xy_world, map_positions)  # shape: [num_envs_in_map]
         
-        # Create lookahead indices
-        lookahead_horizon = torch.linspace(lookahead, lookahead*horizon, horizon, device=env.device)
-        next_idx_horizon = (current_idx.unsqueeze(-1) + lookahead_horizon.unsqueeze(0)) % len(waypoints_xy_world)
-        next_idx_horizon = next_idx_horizon.long()
+        if CONFIG['env_config']['DYNAMIC_LOOKAHEAD']:
+            
+            s_length  = 0.1 # [m]
+            s_horizon = map_vel_x * t_horizon 
+            idx_horizon = s_horizon/s_length
+
+            horizon_indices = calculate_horizon_indices(
+                current_idx=current_idx,
+                idx_horizon=idx_horizon,
+                waypoints_length=len(waypoints_xy_world),
+                n_horizon=n_horizon,
+                device=env.device
+            )
+        else:
+            lookahead_steps = torch.linspace(0, delta_s_idx*n_horizon, n_horizon+1, device=env.device)
+            horizon_indices = (current_idx.unsqueeze(-1) + lookahead_steps.unsqueeze(0)) % len(waypoints_xy_world)
+            horizon_indices = horizon_indices.long()
+
+        # Gather d_lat values - shape: [num_envs_in_map, n_horizon, 2]
+        next_d_lat_horizon = d_lat[horizon_indices[:, 1:], :]
         
-        # Gather d_lat values - shape: [num_envs_in_map, horizon, 2]
-        next_d_lat_horizon = d_lat[next_idx_horizon, :]
-        
-        # Normalize and reshape to [num_envs_in_map, horizon * 2]
+        # Normalize and reshape to [num_envs_in_map, n_horizon * 2]
         norm_d_lat = 1
-        norm_next_d_lat_horizon = next_d_lat_horizon.reshape(-1, horizon * 2) / norm_d_lat
+        norm_next_d_lat_horizon = next_d_lat_horizon.reshape(-1, n_horizon * 2) / norm_d_lat
         
         # Store results in the output tensor
         d_lat_results[env_mask] = norm_next_d_lat_horizon
@@ -517,24 +568,27 @@ def d_lat_horizon(
 def kappa_radpm_horizon(
     env: ManagerBasedEnv, 
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    lookahead: int = 10,
-    horizon: int = 5
+    delta_s_idx: int = 10,
+    n_horizon: int = 5,
+    t_horizon: int = 5
 ) -> torch.Tensor:
     """
-    Calculate curvature (kappa) values for horizon points, supporting multiple maps.
+    Calculate curvature (kappa) values for n_horizon points, supporting multiple maps.
     
     Args:
         env: The environment instance
         asset_cfg: Configuration for the robot asset
-        lookahead: Base number of waypoints to look ahead
-        horizon: Number of lookahead points to return
+        delta_s_idx: Base number of waypoints to look ahead
+        n_horizon: Number of delta_s_idx points to return
         
     Returns:
-        Tensor of normalized curvature values (shape: [num_envs, horizon])
+        Tensor of normalized curvature values (shape: [num_envs, n_horizon])
     """
 
     asset = env.scene[asset_cfg.name]
     pos_xy_world = mdp.root_pos_w(env)[..., :2]
+    vel_x = mdp.base_lin_vel(env)[..., 0]
+
     num_envs = pos_xy_world.shape[0]
 
     if not hasattr(env, '_map_levels'):
@@ -547,7 +601,7 @@ def kappa_radpm_horizon(
     unique_map_levels = torch.unique(map_levels)
     
     # Initialize output tensor
-    kappa_results = torch.zeros(num_envs, horizon, device=env.device)
+    kappa_results = torch.zeros(num_envs, n_horizon, device=env.device)
     
     # Process each map level separately
     for map_level in unique_map_levels:
@@ -560,7 +614,8 @@ def kappa_radpm_horizon(
             
         # Get positions for these environments
         map_positions = pos_xy_world[env_mask]
-        
+        map_vel_x     = vel_x[env_mask]
+
         # Get waypoints and track data for this map level
         waypoints_xy_world = torch.tensor(
             env.scene.terrain.cfg.waypoints_list[map_level],
@@ -583,13 +638,30 @@ def kappa_radpm_horizon(
         # Find nearest waypoint for these environments
         current_idx, _ = find_nearest_waypoint(inner_xy_world, map_positions)  # shape: [num_envs_in_map]
         
-        # Create lookahead indices
-        lookahead_horizon = torch.linspace(lookahead, lookahead*horizon, horizon, device=env.device)
-        next_idx_horizon = (current_idx.unsqueeze(-1) + lookahead_horizon.unsqueeze(0)) % len(waypoints_xy_world)
-        next_idx_horizon = next_idx_horizon.long()
-        
-        # Gather curvature values - shape: [num_envs_in_map, horizon]
-        next_kappa_radpm_horizon = kappa_radpm[next_idx_horizon].squeeze(-1)
+        if CONFIG['env_config']['DYNAMIC_LOOKAHEAD']:
+            s_length  = 0.1 # [m]
+            s_horizon = map_vel_x * t_horizon 
+            idx_horizon = s_horizon/s_length
+
+            horizon_indices = calculate_horizon_indices(
+                current_idx=current_idx,
+                idx_horizon=idx_horizon,
+                waypoints_length=len(waypoints_xy_world),
+                n_horizon=n_horizon,
+                device=env.device
+            )
+        else:
+            lookahead_steps = torch.linspace(0, delta_s_idx*n_horizon, n_horizon+1, device=env.device)
+            horizon_indices = (current_idx.unsqueeze(-1) + lookahead_steps.unsqueeze(0)) % len(waypoints_xy_world)
+            horizon_indices = horizon_indices.long()
+
+        lookahead_steps = torch.linspace(delta_s_idx, delta_s_idx*n_horizon, n_horizon, device=env.device)
+        horizon_indices = (current_idx.unsqueeze(-1) + lookahead_steps.unsqueeze(0)) % len(waypoints_xy_world)
+        horizon_indices = horizon_indices.long()
+
+
+        # Gather curvature values - shape: [num_envs_in_map, n_horizon]
+        next_kappa_radpm_horizon = kappa_radpm[horizon_indices[:, :1]].squeeze(-1)
         
         # Normalize and store results
         norm_kappa_radpm = 1
@@ -600,24 +672,27 @@ def kappa_radpm_horizon(
 def delta_psi_rad_horizon(
     env: ManagerBasedEnv, 
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    lookahead: int = 10,
-    horizon: int = 5
+    delta_s_idx: int = 10,
+    n_horizon: int = 5,
+    t_horizon: int = 5
 ) -> torch.Tensor:
     """
-    Calculate curvature (kappa) values for horizon points, supporting multiple maps.
+    Calculate curvature (kappa) values for n_horizon points, supporting multiple maps.
     
     Args:
         env: The environment instance
         asset_cfg: Configuration for the robot asset
-        lookahead: Base number of waypoints to look ahead
-        horizon: Number of lookahead points to return
+        delta_s_idx: Base number of waypoints to look ahead
+        n_horizon: Number of delta_s_idx points to return
         
     Returns:
-        Tensor of normalized curvature values (shape: [num_envs, horizon])
+        Tensor of normalized curvature values (shape: [num_envs, n_horizon])
     """
 
     asset = env.scene[asset_cfg.name]
     pos_xy_world = mdp.root_pos_w(env)[..., :2]
+    vel_x = mdp.base_lin_vel(env)[..., 0]
+
     num_envs = pos_xy_world.shape[0]
 
     if not hasattr(env, '_map_levels'):
@@ -630,7 +705,7 @@ def delta_psi_rad_horizon(
     unique_map_levels = torch.unique(map_levels)
     
     # Initialize output tensor
-    kappa_results = torch.zeros(num_envs, horizon, device=env.device)
+    kappa_results = torch.zeros(num_envs, n_horizon, device=env.device)
     
     # Process each map level separately
     for map_level in unique_map_levels:
@@ -643,7 +718,7 @@ def delta_psi_rad_horizon(
             
         # Get positions for these environments
         map_positions = pos_xy_world[env_mask]
-        
+        map_vel_x     = vel_x[env_mask]
         # Get waypoints and track data for this map level
         waypoints_xy_world = torch.tensor(
             env.scene.terrain.cfg.waypoints_list[map_level],
@@ -666,14 +741,28 @@ def delta_psi_rad_horizon(
         # Find nearest waypoint for these environments
         current_idx, _ = find_nearest_waypoint(inner_xy_world, map_positions)  # shape: [num_envs_in_map]
         
-        # Create lookahead indices
-        steps = torch.linspace(0, lookahead * horizon, horizon + 1, device=env.device)
-        horizon_indices = (current_idx.unsqueeze(-1) + steps.unsqueeze(0)) % len(waypoints_xy_world)
+        if CONFIG['env_config']['DYNAMIC_LOOKAHEAD']:
+            
+            s_length  = 0.1 # [m]
+            s_horizon = map_vel_x * t_horizon 
+            idx_horizon = s_horizon/s_length
+
+            horizon_indices = calculate_horizon_indices(
+                current_idx=current_idx,
+                idx_horizon=idx_horizon,
+                waypoints_length=len(waypoints_xy_world),
+                n_horizon=n_horizon,
+                device=env.device
+            )
+        else:
+            lookahead_steps = torch.linspace(0, delta_s_idx*n_horizon, n_horizon+1, device=env.device)
+            horizon_indices = (current_idx.unsqueeze(-1) + lookahead_steps.unsqueeze(0)) % len(waypoints_xy_world)
+            horizon_indices = horizon_indices.long()
+
+        lookahead_steps = torch.linspace(delta_s_idx, delta_s_idx*n_horizon, n_horizon, device=env.device)
+        horizon_indices = (current_idx.unsqueeze(-1) + lookahead_steps.unsqueeze(0)) % len(waypoints_xy_world)
         horizon_indices = horizon_indices.long()
 
-        segment_starts = waypoints_xy_world[horizon_indices[:, :-1]]
-        segment_ends = waypoints_xy_world[horizon_indices[:, 1:]]
-        
         delta_psi_rad = (psi_rad[horizon_indices[:, 1:]] - psi_rad[horizon_indices[:, :-1]]).squeeze(-1)
                 
         # Normalize and store results
@@ -681,11 +770,129 @@ def delta_psi_rad_horizon(
         delta_psi_rad[env_mask] = delta_psi_rad / norm_psi_rad
 
     return delta_psi_rad
+
+def opponent_info_frenet(
+    env: ManagerBasedEnv, 
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    opponent_cfg: SceneEntityCfg = SceneEntityCfg("opponent")
+) -> torch.Tensor:
+
+    ego_pos_xy_world = mdp.root_pos_w(env=env, asset_cfg=asset_cfg)[..., :2]
+    opp_pos_xy_world = mdp.root_pos_w(env=env, asset_cfg=opponent_cfg)[..., :2]
+
+    if not hasattr(env, '_map_levels'):
+        env._map_levels = torch.zeros(env.num_envs, 
+                                dtype=torch.long,
+                                device=env.device)
+        
+    # Get map levels for all environments
+    map_levels = env._map_levels  # shape: [num_envs]
+    unique_map_levels = torch.unique(map_levels)
+
+    num_envs = ego_pos_xy_world.shape[0]
+    s_idx_diff_opp_ego    = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
+    d_diff_opp_ego        = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
+    opp_detected          = torch.zeros(num_envs, device = env.device, dtype=torch.long)
+
+    # Process each map level separately
+
+    num_episodes = env.common_step_counter // env.max_episode_length
+    if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_EP']:
+        return torch.stack([s_idx_diff_opp_ego, d_diff_opp_ego, opp_detected],dim=1)
+
+    for map_level in unique_map_levels:
+        # Create mask for environments using this map
+        env_mask = (map_levels == map_level)
+        num_envs_in_map = env_mask.sum()
+        
+        if num_envs_in_map == 0:
+            continue
+            
+        # Get positions for these environments
+        ego_map_positions = ego_pos_xy_world[env_mask]
+        opp_map_positions = opp_pos_xy_world[env_mask]
+
+        # Get waypoints and track data for this map level
+        waypoints_xy_world = torch.tensor(
+            env.scene.terrain.cfg.waypoints_list[map_level],
+            device=env.device,
+            dtype=torch.float32
+        )[:, :2]
+
+        inner_xy_world = torch.tensor(
+            env.scene.terrain.cfg.inner_list[map_level],
+            device=env.device,
+            dtype=torch.float32
+        )[:, :2]
+        
+        d_lat = torch.tensor(
+            env.scene.terrain.cfg.d_lat_list[map_level],
+            device=env.device,
+            dtype=torch.float32
+        )
+        
+        num_waypoints = len(waypoints_xy_world)
+        ego_current_s_idx, ego_current_d = find_nearest_waypoint(waypoints_xy_world, ego_map_positions)
+        opp_current_s_idx, opp_current_d = find_nearest_waypoint(waypoints_xy_world, opp_map_positions)
+
+        d_diff            = opp_current_d     - ego_current_d
+        s_idx_diff_raw    = opp_current_s_idx - ego_current_s_idx
+        s_idx_diff_signed = (s_idx_diff_raw + num_waypoints // 2) % num_waypoints - (num_waypoints // 2)
+
+        # s_idx_diff_ot = torch.where((s_idx_diff_signed > 0) & (s_idx_diff_signed <= CONFIG['env_config']['OPPONENT_DETECTION_IDX']),
+        #                         s_idx_diff_signed, 
+        #                         torch.zeros_like(s_idx_diff_signed))  
+
+        s_idx_diff_opp_ego[env_mask] = torch.where(abs(s_idx_diff_signed) <= CONFIG['env_config']['OPPONENT_DETECTION_IDX'],
+                                       s_idx_diff_signed, 
+                                       torch.zeros(len(env_mask), device=env.device, dtype= torch.float32))  
+        d_diff_opp_ego[env_mask]     = torch.where(abs(s_idx_diff_signed) <= CONFIG['env_config']['OPPONENT_DETECTION_IDX'],
+                                       d_diff, 
+                                       torch.ones(len(env_mask), device=env.device, dtype= torch.float32)*5)  
+        opp_detected[env_mask]       = torch.where(abs(s_idx_diff_signed) <= CONFIG['env_config']['OPPONENT_DETECTION_IDX'],
+                                       torch.ones(len(env_mask), device=env.device, dtype= torch.long), 
+                                       torch.zeros(len(env_mask), device=env.device, dtype= torch.long))  
+
+    return torch.stack([s_idx_diff_opp_ego, d_diff_opp_ego, opp_detected],dim=1)
+
+def calculate_horizon_indices(
+    current_idx: torch.Tensor,
+    idx_horizon: torch.Tensor,
+    waypoints_length: int,
+    n_horizon: int,
+    device: torch.device
+) -> torch.Tensor:
+    """
+    Calculate n_horizon indices for waypoint following in a vectorized manner.
+    
+    Args:
+        current_idx: Current waypoint indices [num_envs]
+        idx_horizon: delta_s_idx distance in indices [num_envs]
+        waypoints_length: Total number of waypoints
+        n_horizon: Number of delta_s_idx points
+        device: Target device for computations
+        
+    Returns:
+        Tensor of waypoint indices [num_envs, n_horizon + 1]
+    """
+    # Create normalized steps [n_horizon + 1]
+    normalized_steps = torch.linspace(0, 1, n_horizon + 1, device=device)
+    
+    # Vectorized step calculation [num_envs, n_horizon + 1]
+    steps = idx_horizon.unsqueeze(-1) * normalized_steps.unsqueeze(0)
+    steps = steps.long()
+    
+    # Create n_horizon indices with circular buffer
+    horizon_indices = (current_idx.unsqueeze(-1) + steps) % waypoints_length
+    return horizon_indices.long()
+
 ##########################
 # Variables for observation space. Better way to implement it?
 
-N_STEP_LOOKAHEAD = 20
-STEP_LOOKAHEAD = 10 
+N_HORIZON = CONFIG['env_config']['N_HORIZON'] 
+DELTA_S_IDX = CONFIG['env_config']['DELTA_S_IDX'] 
+
+T_HORIZON = CONFIG['env_config']['T_HORIZON']
 ##########################
 
 @configclass
@@ -744,30 +951,37 @@ class F1TenthTimeTrialObsCfg:
                 
         heading_error = ObsTerm(
             func=heading_error_horizon,
-            params={'lookahead': STEP_LOOKAHEAD,
-                    'horizon': N_STEP_LOOKAHEAD}
+            params={'delta_s_idx': DELTA_S_IDX,
+                    'n_horizon': N_HORIZON,
+                    't_horizon': T_HORIZON}
         )
         deviation_error = ObsTerm(
             func=deviation_centerline_horizon,
-            params={'lookahead': STEP_LOOKAHEAD,
-                    'horizon': N_STEP_LOOKAHEAD}
+            params={'delta_s_idx': DELTA_S_IDX,
+                    'n_horizon': N_HORIZON,
+                    't_horizon': T_HORIZON}
         )
         d_lat_horizon = ObsTerm(
             func=d_lat_horizon,
-            params={'lookahead': STEP_LOOKAHEAD,
-                    'horizon': N_STEP_LOOKAHEAD}
+            params={'delta_s_idx': DELTA_S_IDX,
+                    'n_horizon': N_HORIZON,
+                    't_horizon': T_HORIZON}
         )
         #only one env gives problem
         kappa_radpm_horizon = ObsTerm(
             func=kappa_radpm_horizon,
-            params={'lookahead': STEP_LOOKAHEAD,
-                    'horizon': N_STEP_LOOKAHEAD}
+            params={'delta_s_idx': DELTA_S_IDX,
+                    'n_horizon': N_HORIZON,
+                    't_horizon': T_HORIZON}
         )
 
+        static_opponent = ObsTerm(
+            func=opponent_info_frenet
+        )
         # delta_psi_rad_horizon = ObsTerm(
         #     func=delta_psi_rad_horizon,
-        #     params={'lookahead': STEP_LOOKAHEAD,
-        #             'horizon': N_STEP_LOOKAHEAD}
+        #     params={'delta_s_idx': delta_s_idx,
+        #             'n_horizon': N_STEP_LOOKAHEAD}
         # )
 
         def __post_init__(self) -> None:
@@ -830,19 +1044,19 @@ class F1TenthTimeTrialTerrainImporterCfg(TerrainImporterCfg):
     )
     debug_vis = True
     
-    def generate_random_poses_from_waypoints(self, env : ManagerBasedEnv, env_ids, num_poses):
+    def generate_random_poses_from_waypoints(self, env : ManagerBasedEnv, env_ids, num_poses, max_radius_offset=0.3):
         
         # generate random initial poses with margin
         env_origins = env.scene.env_origins
         map_levels = env._map_levels
         # add which map level
 
-        init_poses, init_current_wps_idx = generate_random_poses_from_waypoints(env_ids, num_poses, map_levels, env_origins, self.origin_list, self.waypoints_list, self.inner_list, margin=0.1)
+        init_poses, init_current_wps_idx = generate_random_poses_from_waypoints(env_ids, num_poses, map_levels, env_origins, self.origin_list, self.waypoints_list, self.inner_list, max_radius_offset=0.3)
         # init_poses, init_current_wps_idx = generate_random_poses_from_list(env_ids, num_poses, map_levels, env_origins, self.origin_list, self.row_spacing_list, self.col_spacing_list, self.traversability_hashmap_list, self.waypoints_list, self.outer_list, self.inner_list, margin=0.1)
-        
+        max_radius_offset = 0.75
         valid_init_poses = [
             InitialPoseCfg(
-                pos=(x, y, 0.02),
+                pos=(x + random.uniform(-1,1)*max_radius_offset, y + random.uniform(-1,1)*max_radius_offset, 0.02),
                 rot_euler_xyz_deg=(0., 0., angle)
             ) for x, y, angle in init_poses
         ]
@@ -912,8 +1126,33 @@ class F1TenthTimeTrialSceneCfg(InteractiveSceneCfg):
     )
 
     robot: AssetBaseCfg = F1TENTH_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    # opponent: AssetBaseCfg = OPPONENT_CFG.replace(prim_path="{ENV_REGEX_NS}/Opponent")
     # robot: ArticulationCfg = MUSHR_SUS_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
     # robot: ArticulationCfg = LB_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    
+       # Add cuboid configuration
+    opponent = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Opponent",
+        spawn=sim_utils.CuboidCfg(
+            size = (0.6, 0.35, 0.3),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                kinematic_enabled= False, 
+                rigid_body_enabled=True,
+                solver_position_iteration_count=4,
+                solver_velocity_iteration_count=1,
+                max_angular_velocity=100.0,
+                max_linear_velocity=100.0,
+                max_depenetration_velocity=0.0,
+                disable_gravity=True,
+            ),
+            physics_material=sim_utils.RigidBodyMaterialCfg(
+                static_friction=0.5,
+                dynamic_friction=0.5,
+                restitution=0.5,
+            ),
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(0.0, 0.0, 0.0)),  # 10cm above ground
+    )
 
     ground.init_state.pos = (0.0, 0.0, -1e-4)
 
@@ -922,6 +1161,10 @@ class F1TenthTimeTrialSceneCfg(InteractiveSceneCfg):
         super().__post_init__()
 
         self.robot.init_state = self.robot.init_state.replace(
+            pos=(0.0, 0.0, 0.0)
+        )
+
+        self.opponent.init_state = self.opponent.init_state.replace(
             pos=(0.0, 0.0, 0.0)
         )
 
@@ -948,6 +1191,11 @@ def store_data(
     env.extras['time'] = torch.tensor(env.sim.current_time, device=env.device)
     env.extras['s_idx_max'] = torch.tensor(num_waypoints-1, device=env.device)
 
+
+
+
+
+
 @configclass
 class F1TenthTimeTrialEventsCfg:
     
@@ -957,11 +1205,18 @@ class F1TenthTimeTrialEventsCfg:
             func=reset_root_state_random,
             mode="reset",
         )
+
+        reset_root_state_random_opponent = EventTerm(
+            func=reset_root_state_random_opponent,
+            mode="reset",
+        )
     else:
         reset_root_state_start_idx = EventTerm(
             func=reset_root_state_start_idx,
             mode="reset",
         )
+
+
 
     # store_data = EventTerm( 
     #     func= store_data,
@@ -1024,7 +1279,7 @@ class F1TenthTimeTrialEventsRandomCfg(F1TenthTimeTrialEventsCfg):
     #     mode="startup",
     #     params={
     #         "static_friction_range": (STATIC_FRICTION-0.1, STATIC_FRICTION+0.1),
-    #         "dynamic_friction_range": (DYNAMIC_FRICTION-0.2, DYNAMIC_FRICTION+0.2),
+    #         "dynamic_friction_range": (DYNAMIC_FRICTION-0.1, DYNAMIC_FRICTION+0.1),
     #         "restitution_range": (0.0, 0.0),
     #         "num_buckets": 20,
     #         "asset_cfg": SceneEntityCfg("robot", body_names="wheel.*"),
@@ -1090,8 +1345,8 @@ def wall_collision_penalty(env):
 
 
         # Check for collisions with inner and outer bounds
-        collision_with_inner = dist_from_inner < CONFIG['env_config']['COLLISION_RADIUS']
-        collision_with_outer = dist_from_outer < CONFIG['env_config']['COLLISION_RADIUS']
+        collision_with_inner = abs(dist_from_inner) < CONFIG['env_config']['WALL_COLLISION_RADIUS']
+        collision_with_outer = abs(dist_from_outer) < CONFIG['env_config']['WALL_COLLISION_RADIUS']
         
         # Combine collisions (OR operation - collision with either counts)
         collisions_in_map = collision_with_inner | collision_with_outer
@@ -1102,7 +1357,114 @@ def wall_collision_penalty(env):
         # Update the collision_bool tensor for these environments
         collision_bool[env_mask] = collisions_in_map
 
-    return torch.where(collision_bool.bool(), -1, 0)
+    return torch.where(collision_bool.bool(), -1*forward_vel(env)**2, 0)
+    # return torch.where(collision_bool.bool(), -1, 0)
+
+
+def opponent_collision_penalty(env):
+    num_episodes = env.common_step_counter // env.max_episode_length
+    if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_EP']:
+        return torch.zeros(env.num_envs, device=env.device, dtype=torch.long)
+    
+    ego_position_xy = env.scene["robot"].data.root_pos_w[:, :2]
+    opp_position_xy = env.scene["opponent"].data.root_pos_w[:, :2]
+    dist = torch.norm(ego_position_xy - opp_position_xy, p=2, dim=1)
+    opp_collision = dist < CONFIG['env_config']['OPP_COLLISION_RADIUS']
+
+    return torch.where(opp_collision.bool(), -1*forward_vel(env)**2, 0)
+    # return torch.where(opp_collision.bool(), -1, 0)
+
+def opponent_overtaking_reward(env):
+    num_episodes = env.common_step_counter // env.max_episode_length
+    if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_EP']:
+        return torch.zeros(env.num_envs, device=env.device, dtype=torch.long)
+    
+    if not hasattr(env, '_prev_dist_opp_ego'):
+        env._prev_dist_opp_ego = torch.ones(env.num_envs, 
+                                dtype=torch.float32,
+                                device=env.device)*CONFIG['env_config']['OPPONENT_DETECTION_IDX']
+        
+    ego_position_xy = env.scene["robot"].data.root_pos_w[:, :2]
+    opp_position_xy = env.scene["opponent"].data.root_pos_w[:, :2]
+    dist = torch.norm(ego_position_xy - opp_position_xy, p=2, dim=1)
+
+    if not hasattr(env, '_map_levels'):
+        env._map_levels = torch.zeros(env.num_envs, 
+                                dtype=torch.long,
+                                device=env.device)
+    if not hasattr(env, '_progress_history_indices'):
+        env._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']  # Store last 10 waypoints
+
+        env._progress_history_indices = torch.zeros(
+            (env.num_envs, env._progress_history_length), 
+            dtype=torch.long,
+            device=env.device
+        )
+        env._reset_env_bool = torch.ones(  # Tracks where to insert the next index
+            env.num_envs,
+            dtype=torch.bool,
+            device=env.device
+        )
+    if not hasattr(env, '_progress_history_checkpoint_idx'):
+        env._progress_history_checkpoint_idx = CONFIG['env_config']['PROGRESS_HISTORY_CHECKPOINT_IDX']
+    map_levels = env._map_levels  # shape: [num_envs]
+    unique_map_levels = torch.unique(map_levels)
+    
+    # Initialize outputs
+    dist_opp_ego       = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
+    delta_dist_opp_ego = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
+
+    detection_opp_bool = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    far_way_opp_bool   = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    # current_indices = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+    
+    # Process each map level separately
+    for map_level in unique_map_levels:
+        env_mask = (map_levels == map_level)
+        num_envs_in_map = env_mask.sum()
+        
+        if num_envs_in_map == 0:
+            continue
+            
+        # Get waypoints for this map level
+        waypoints_world = torch.tensor(
+            env.scene.terrain.cfg.waypoints_list[map_level], 
+            device=env.device
+        )[:, :2]
+        num_waypoints = len(waypoints_world)
+
+        # Find nearest waypoint for these environments
+        ego_current_idx, _ = find_nearest_waypoint(
+            waypoints_world, 
+            ego_position_xy[env_mask]
+        )
+        opp_current_idx, _ = find_nearest_waypoint(
+            waypoints_world, 
+            opp_position_xy[env_mask]
+        )
+
+        dist_opp_ego[env_mask] = ((opp_current_idx-ego_current_idx + num_waypoints//2) % num_waypoints - num_waypoints // 2).float()
+        delta_dist_opp_ego[env_mask] = env._prev_dist_opp_ego[env_mask] - dist_opp_ego[env_mask]
+        
+        detection_opp_bool[env_mask] = abs(dist_opp_ego[env_mask]) < CONFIG['env_config']['OPPONENT_DETECTION_IDX']
+        far_way_opp_bool[env_mask]   = abs(dist_opp_ego[env_mask]) > CONFIG['env_config']['OPPONENT_FAR_AWAY_IDX']
+        env._prev_dist_opp_ego[env_mask] = dist_opp_ego[env_mask]
+
+    far_way_opp_bool_mask = far_way_opp_bool == 1
+    env._prev_dist_opp_ego[far_way_opp_bool_mask] = torch.ones(far_way_opp_bool_mask.sum().item(),
+                                dtype=torch.float32,
+                                device=env.device)*CONFIG['env_config']['OPPONENT_DETECTION_IDX']
+
+    if not hasattr(env, '_traversability_history'):
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
+        env._traversability_history = torch.ones(
+            (env.num_envs, env._rew_history_length), 
+            dtype=torch.long,
+            device=env.device
+        )
+    no_off_track = env._traversability_history.min(dim=1).values == 1
+
+    return torch.where(detection_opp_bool & no_off_track, delta_dist_opp_ego*CONFIG['env_config']['LEN_S_IDX'], 0)
 
 def traversable_reward(env):
     poses =mdp.root_pos_w(env)[..., :2]
@@ -1231,7 +1593,7 @@ def progress_waypoint_bool(env):
         progress[env_mask] = current_progress
         
         # Calculate progress bool
-        progress_bool[env_mask] = (current_progress > 0) & (current_progress <= 30) & (env._reset_env_bool[env_mask] == False)
+        progress_bool[env_mask] = (current_progress > 0) & (current_progress <= CONFIG['env_config']['MAX_PROGRESS_IDX']) & (env._reset_env_bool[env_mask] == False)
     
     # Reset flags
     env._reset_env_bool = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
@@ -1276,17 +1638,27 @@ class F1TenthTimeTrialRewardsCfg:
     #     weight=1,
     # )
 
-    wall_collision_penalty = RewTerm(
-        func=wall_collision_penalty,
-        weight=1,
-    )
-
-
     # Standard reward for progressing along centerline, weight=1
     progress_rew = RewTerm(
         func=progress_rew,
         weight=1,
     )
+
+    opponent_overtaking_reward = RewTerm(
+        func=opponent_overtaking_reward,
+        weight=1,
+    )
+
+    wall_collision_penalty = RewTerm(
+        func=wall_collision_penalty,
+        weight=1,
+    )
+
+    opponent_collision_penalty = RewTerm(
+        func=opponent_collision_penalty,
+        weight=1,
+    )
+
 
     if CONFIG['env_config']['CONSTANT_SPEED']:
         # # # Reward terms to test various frictions, simple task (constant velocity and steering, drive in circle)
@@ -1297,14 +1669,6 @@ class F1TenthTimeTrialRewardsCfg:
             },
             weight= 1.,
         )
-
-    # steering_target_rew = RewTerm(
-    #     func=steering_target_rew,
-    #     params={
-    #         "steering_target": 0.05
-    #     },
-    #     weight= 10.,
-    # )
 
 ########################
 ###### CURRICULUM ######
@@ -1360,9 +1724,9 @@ def is_not_traversable(env):
         env._map_levels = torch.zeros(env.num_envs, 
                                 dtype=torch.long,
                                 device=env.device)
-    map_levels = env._map_levels
+    map_levels     = env._map_levels
     traversability = TraversabilityHashmapUtil().get_traversability(poses, map_levels)
-    num_episodes = env.common_step_counter // env.max_episode_length
+    num_episodes   = env.common_step_counter // env.max_episode_length
 #   delay the termination for the first 10 episodes
     # if num_episodes < 50:
     #     # return false (IS traversable)
@@ -1429,8 +1793,8 @@ def wall_collision(env):
 
 
         # Check for collisions with inner and outer bounds
-        collision_with_inner = dist_from_inner < CONFIG['env_config']['COLLISION_RADIUS']
-        collision_with_outer = dist_from_outer < CONFIG['env_config']['COLLISION_RADIUS']
+        collision_with_inner = abs(dist_from_inner) < CONFIG['env_config']['WALL_COLLISION_RADIUS']
+        collision_with_outer = abs(dist_from_outer) < CONFIG['env_config']['WALL_COLLISION_RADIUS']
         
         # Combine collisions (OR operation - collision with either counts)
         collisions_in_map = collision_with_inner | collision_with_outer
@@ -1442,6 +1806,27 @@ def wall_collision(env):
         collision_bool[env_mask] = collisions_in_map
 
     return collision_bool.bool()
+
+def opponent_collision(env):
+    num_episodes = env.common_step_counter // env.max_episode_length
+    if num_episodes <  CONFIG['env_config']['IGNORE_OPPONENT_EP']:
+        return torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
+    
+    if not hasattr(env, '_prev_dist_opp_ego'):
+        env._prev_dist_opp_ego = torch.ones(env.num_envs, 
+                                dtype=torch.float32,
+                                device=env.device)*CONFIG['env_config']['OPPONENT_DETECTION_IDX']*0.1
+        
+    ego_position_xy = env.scene["robot"].data.root_pos_w[:, :2]
+    opp_position_xy = env.scene["opponent"].data.root_pos_w[:, :2]
+    
+    dist = torch.norm(ego_position_xy - opp_position_xy, p=2, dim=1)
+
+
+    opp_collision = dist < CONFIG['env_config']['OPP_COLLISION_RADIUS']
+
+    
+    return opp_collision.bool()
 
 def is_reverse(env):
     reverse = reverse_waypoint_bool(env)
@@ -1511,6 +1896,10 @@ class F1TenthTimeTrialTerminationsCfg:
             func=wall_collision
         )
 
+        opponent_collision_collision = DoneTerm(
+            func=opponent_collision
+        )
+
     # out_range = DoneTerm(
     #     func=out_of_map,
     # )
@@ -1563,6 +1952,7 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
         # Terminations config
         self.episode_length_s = 20
         self.actions.throttle_steer.scale = (CONFIG['env_config']['MAX_SPEED_SCALING'], CONFIG['env_config']['MAX_STEERING_SCALING'])
+        self.actions.throttle_steer.offset = (CONFIG['env_config']['SPEED_OFFSET'], CONFIG['env_config']['STEERING_OFFSET'])
 
 
         # Terrain variables
@@ -1647,6 +2037,10 @@ class F1TenthTimeTrialEnv(ManagerBasedEnv):
                                                 dtype=torch.long,
                                                 device=self.device)
 
+        self._prev_dist_opp_ego = torch.zeros(self.num_envs,
+                                                   dtype=torch.float32,
+                                                   device=self.device)
+        
         # Save history of last #history_length waypoints idx
         self._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']
         self._progress_history_checkpoint_idx = CONFIG['env_config']['PROGRESS_HISTORY_CHECKPOINT_IDX']
@@ -1688,8 +2082,6 @@ class F1TenthTimeTrialEnv(ManagerBasedEnv):
             dtype=torch.long,
             device=self.device
         )
-        
-
 
         # Bool to determine if the car has just reset; it is set to True when a new pose is generated, and afterwards immediately set to false 
         self._reset_env_bool = torch.zeros(  # Tracks where to insert the next index

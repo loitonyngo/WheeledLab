@@ -53,7 +53,32 @@ _ZERO_INIT_STATES = ArticulationCfg.InitialStateCfg(
 # Overall configuration tying together the asset, physics, and initial state.
 F1TENTH_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{WHEELEDLAB_ASSETS_DATA_DIR}/Robots/F1TENTH/f1tenth_mod.usd",
+        usd_path=f"{WHEELEDLAB_ASSETS_DATA_DIR}/Robots/F1TENTH/f1tenth_ego.usd",
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            rigid_body_enabled=True,
+            linear_damping=None,
+            angular_damping=None,
+            max_linear_velocity=1000.0,
+            max_angular_velocity=100000.0,
+            max_depenetration_velocity=100.0,
+            max_contact_impulse=0.0,
+            enable_gyroscopic_forces=True,
+        ),
+        articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+            enabled_self_collisions=False,
+            solver_position_iteration_count=4,
+            solver_velocity_iteration_count=0,
+            sleep_threshold=0.005,
+            stabilization_threshold=0.001,
+        ),
+    ),
+    init_state=_ZERO_INIT_STATES,
+    actuators=F1TENTH_4WD_ACTUATOR_CFG,
+)
+
+OPPONENT_CFG = ArticulationCfg(
+    spawn=sim_utils.UsdFileCfg(
+        usd_path=f"{WHEELEDLAB_ASSETS_DATA_DIR}/Robots/F1TENTH/f1tenth_opp.usd",
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             rigid_body_enabled=True,
             linear_damping=None,

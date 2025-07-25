@@ -11,8 +11,8 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%")
 @configclass
 class RSS_TEST(RslRlRunConfig):
     env_setup = EnvSetup(
-        num_envs=64,
-        env_spacing= 20,
+        num_envs=256,
+        env_spacing= 12,
         task_name="Isaac-F1TenthTimeTrialRL-v0"
     )
     # unique-jazz-683

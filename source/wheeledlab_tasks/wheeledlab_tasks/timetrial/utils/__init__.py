@@ -7,6 +7,7 @@ from .maps_utils import *
 ### hard coded for now
 
 import time
+import random 
 
 def create_maps_from_waypoints(maps_folder_path, map_name_list, origin_list, stage_path, resolution):
     """
@@ -326,7 +327,7 @@ def generate_random_poses(env_origins, env_ids, num_poses, row_spacing, col_spac
     
     return poses
 
-def generate_random_poses_from_waypoints(env_ids, num_poses, map_levels, env_origins, map_origin_list, waypoints_usd_list, inner_usd_list, margin=0.1):
+def generate_random_poses_from_waypoints(env_ids, num_poses, map_levels, env_origins, map_origin_list, waypoints_usd_list, inner_usd_list, max_radius_offset=1):
     """
     Generate random poses by selecting from waypoints, supporting multiple maps based on map_level.
     Only generates poses for environments specified in env_ids.
@@ -378,8 +379,8 @@ def generate_random_poses_from_waypoints(env_ids, num_poses, map_levels, env_ori
         angles = torch.rad2deg(torch.atan2(deltas[:, 1], deltas[:, 0])) + np.random.uniform(-15, 15, size=len(current_env_ids))
         
         # Shift the coordinates according to env_origins for the reset
-        xs_shifted = xs + env_origins[current_env_ids, 0].cpu().numpy() + np.array(map_origin_list)[map_level, 0] + np.random.rand()*0.3 - np.random.rand()*0.3
-        ys_shifted = ys + env_origins[current_env_ids, 1].cpu().numpy() + np.array(map_origin_list)[map_level, 1] + np.random.rand()*0.3 - np.random.rand()*0.3
+        xs_shifted = xs + env_origins[current_env_ids, 0].cpu().numpy() + np.array(map_origin_list)[map_level, 0]
+        ys_shifted = ys + env_origins[current_env_ids, 1].cpu().numpy() + np.array(map_origin_list)[map_level, 1] 
         
         # Store results in the output arrays at the correct positions
         all_xs_shifted[env_mask] = xs_shifted
@@ -396,19 +397,44 @@ def find_nearest_waypoint(waypoints: torch.Tensor,  # Shape: [M, 2] - M waypoint
                          positions: torch.Tensor, # [N,2] - N environements
                          ) -> tuple[int, torch.Tensor]:
     """
-    Finds closest waypoints for all cars, handling circular track wrapping.
-    If lookahead is None, searches all waypoints (accurate but slower).
-    With lookahead, only checks next K waypoints from current closest (faster).
+    Finds closest waypoints for all cars with signed distances (left=positive, right=negative).
+    Tangent direction is estimated from the next waypoint in the sequence.
+
+    Args:
+        waypoints: [M, 2] array of waypoint coordinates
+        positions: [N, 2] array of car positions
+
+    Returns:
+        closest_idx: [N] tensor of nearest waypoint indices
+        signed_dists: [N] tensor of signed distances (left side positive)
     """
     M = waypoints.shape[0]
     N = positions.shape[0]
+
+    # Compute vectors from waypoints to positions [N, M, 2]
+    diffs = positions.unsqueeze(1) - waypoints.unsqueeze(0)
     
-    # First find rough closest without wrapping [N]
-    diffs = positions.unsqueeze(1) - waypoints.unsqueeze(0)  # [N,M,2]
-    dists = torch.norm(diffs, p=2, dim=2)  # [N,M]
-    closest_idx = torch.argmin(dists, dim=1)  # [N]
+    # Compute Euclidean distances [N, M]
+    dists = torch.norm(diffs, p=2, dim=2)
     
-    return closest_idx, dists[torch.arange(N), closest_idx]
+    # Find closest waypoint for each position [N]
+    closest_idx = torch.argmin(dists, dim=1)
+    
+    # Estimate tangent vectors (direction to NEXT waypoint, with wrap-around)
+    next_idx = (closest_idx + 1) % M
+    tangents = waypoints[next_idx] - waypoints[closest_idx]
+    tangents = tangents / torch.norm(tangents, p=2, dim=1, keepdim=True)  # Normalize
+
+    # Get the diff vectors for the closest waypoints [N, 2]
+    closest_diffs = diffs[torch.arange(N), closest_idx]
+
+    # Compute cross product (z-component of 2D cross product)
+    cross = closest_diffs[:, 0] * tangents[:, 1] - closest_diffs[:, 1] * tangents[:, 0]
+    
+    # Sign is positive if cross product is positive (left side)
+    signed_dists = dists[torch.arange(N), closest_idx] * torch.sign(cross)
+    
+    return closest_idx, signed_dists
 
 if __name__ == "__main__":
     create_maps_from_png('test.usd', 100, 100, 0.3, 0.3, 0.3)
