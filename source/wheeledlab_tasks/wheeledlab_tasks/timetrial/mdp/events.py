@@ -6,7 +6,7 @@ from isaaclab.envs import ManagerBasedEnv
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.assets import Articulation, RigidObject
 from isaaclab.terrains import TerrainImporter
-from ..utils import find_nearest_waypoint
+from ..utils import find_frenet_coord_along_waypoints
 import yaml
 with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/timetrial/config/f1tenth_timetrial_config.yaml", "r") as f:
     CONFIG = yaml.safe_load(f)
@@ -140,6 +140,11 @@ def reset_root_state_random_opponent(
                                     dtype=torch.long,
                                     device=env.device)
         
+    if not hasattr(env, '_prev_delta_s_opp_ego'):
+        env._prev_delta_s_opp_ego = torch.ones(env.num_envs, 
+                                dtype=torch.float32,
+                                device=env.device)*CONFIG['env_config']['OPPONENT_DETECTION_IDX']  
+        
     env._map_levels[env_ids] = torch.tensor(np.floor(np.random.rand(len(env_ids))*len(env.cfg.scene.terrain.traversability_hashmap_list)), device = env.device, dtype=torch.long)
 
     # valid_poses = terrain.cfg.generate_poses_from_init_points(env, env_ids)
@@ -166,6 +171,9 @@ def reset_root_state_random_opponent(
     asset.write_root_pose_to_sim(torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
     asset.write_root_velocity_to_sim(torch.cat([lin_vels, ang_vels], dim=-1), env_ids=env_ids)
 
+    env._prev_delta_s_opp_ego[env_ids]  = torch.ones(len(env_ids), 
+                                dtype=torch.float32,
+                                device=env.device)*CONFIG['env_config']['OPPONENT_DETECTION_IDX']  
 def reset_root_state_start_idx(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor,

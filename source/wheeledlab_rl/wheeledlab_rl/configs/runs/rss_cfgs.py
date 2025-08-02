@@ -11,14 +11,12 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%")
 @configclass
 class RSS_TEST(RslRlRunConfig):
     env_setup = EnvSetup(
-        num_envs=256,
-        env_spacing= 12,
+        num_envs=64,
+        env_spacing= 24,
         task_name="Isaac-F1TenthTimeTrialRL-v0"
     )
     # unique-jazz-683
     train = RLTrainConfig(
-        # load_run=None,
-        # load_run_checkpoint=0,
         num_iterations=5000,
         rl_algo_lib="rsl",
         rl_algo_class="ppo",

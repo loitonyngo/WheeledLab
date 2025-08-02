@@ -17,16 +17,16 @@ class LogConfig:
     no_log: bool = False                                # Disable logging
     log_every: int = 25                                 # Log every n updates
     video: bool = True                                  # Record videos during training
-    video_length: int = 500                             # Length of the recorded video (in steps)
+    video_length: int = 250                             # Length of the recorded video (in steps)
     video_interval: int = 5000                          # Interval between video recordings (in steps)
     no_checkpoints: bool = False                        # Disable saving checkpoints
-    checkpoint_every: int = 100                         # Save checkpoint every n updates
+    checkpoint_every: int = 50                         # Save checkpoint every n updates
     no_wandb: bool = False                              # Disable wandb logging
     wandb_project: str = "WheeledLab"                   # Wandb project name
     test_mode: bool = False                             # Test mode (disable logging, wandb, video, checkpoints). Overrides other flags
     model_save_dirname: str = "models"                  # Path to save the model under log_dir
-    video_resolution: tuple[int, int] = (1280, 720)     # Resolution of the recorded video, Width x Height
-    video_crf: int = 30                                 # Constant Rate Factor for video compression
+    video_resolution: tuple[int, int] = (640, 360)     # Resolution of the recorded video, Width x Height
+    video_crf: int = 50                                 # Constant Rate Factor for video compression
     run_name: str = f"run-{random.randint(0, 1e7)}"     # Name of the run
 
     @property
@@ -46,8 +46,8 @@ class TrainConfig:
     device: str = "cuda:0"              # Device to use
     load_run: Optional[str] = None    # Load a previously trained model
     load_run_checkpoint: int = 0        # Load a specific checkpoint from a previously trained model
-    # load_run: Optional[str] = "dutiful-microwave-682"      # Load a previously trained model
-    # load_run_checkpoint: int = 75        # Load a specific checkpoint from a previously trained model
+    # load_run: Optional[str] = "tough-salad-1174"      # Load a previously trained model
+    # load_run_checkpoint: int = 500        # Load a specific checkpoint from a previously trained model
 
     log: LogConfig = LogConfig()
 

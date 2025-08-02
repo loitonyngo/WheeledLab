@@ -3,20 +3,20 @@ env_config:
   MAP_NAME_LIST: ['THETRACK']
   ORIGIN_LIST: [[0, 0], [28, 0], [0, 28], [28, 28]]
   
-  DYNAMIC_FRICTION: 0.8
-  STATIC_FRICTION: 0.8
+  DYNAMIC_FRICTION: 0.7
+  STATIC_FRICTION: 0.7
   RESTITUTION: 0.0
 
   CONSTANT_SPEED: False
   CONSTANT_SPEED_TARGET: 5
 
-  NON_TRAVERSABLE_TERMINATION: True
-  
-  RESET_RANDOM: True
+  # usually both true
+  NON_TRAVERSABLE_TERMINATION: False
+  RESET_RANDOM: False
 
-  MAX_SPEED_SCALING: 10
+  MAX_SPEED_SCALING: 8
   MAX_STEERING_SCALING: 0.40
-  SPEED_OFFSET: 0.5
+  SPEED_OFFSET: 0
   STEERING_OFFSET: 0.0
 
   PLAY_POLICY: True
@@ -24,12 +24,19 @@ env_config:
   # SIM_DT: Physics simulation time step
   # SIM_DECIMATION: Number of physics steps per simulation step; 
   # The actions, observations, and rewards are computed every SIM_DECIMATION steps, and every SIM_DECIMATION*SIM_DT seconds.
+  EPISODE_LENGTH_S: 15
   SIM_DT: 0.00625
+  SIM_DECIMATION: 8
+  # SIM_DT: 0.025
+  # SIM_DECIMATION: 1
+
   LEN_S_IDX: 0.1 
   # SIM_DT: 0.003125
-  SIM_DECIMATION: 8
+
   MIN_DELAY_STEERING: 24 #sim dt steps
   MAX_DELAY_STEERING: 24
+  MIN_DELAY_THROTTLE: 8 #sim dt steps
+  MAX_DELAY_THROTTLE: 8
 
   # PROGRESS_HISTORY_LENGTH: Number of last waypoints to store in the history buffer, every every SIM_DECIMATION*SIM_DT seconds.
   # PROGRESS_HISTORY_CHECKPOINT_IDX: Index of the last checkpoint in the history buffer used to compute the difference in progress
@@ -41,12 +48,8 @@ env_config:
   REW_HISTORY_LENGTH: 4
 
   WALL_COLLISION_RADIUS: 0.25
-  OPP_COLLISION_RADIUS: 0.4
   
   MAX_PROGRESS_IDX: 30 
-  OPPONENT_DETECTION_IDX: 80
-  OPPONENT_FAR_AWAY_IDX: 120
-  IGNORE_OPPONENT_EP: 10000
 
   # True if lookahed changes with current velocity
   DYNAMIC_LOOKAHEAD: False
@@ -54,3 +57,9 @@ env_config:
   # Otherwise use constant idx steps (s_horizon = delta_s_idx [0.1m/idx] * N_horizon_idx [idx])
   DELTA_S_IDX: 10
   N_HORIZON: 20
+
+  
+  OPP_COLLISION_RADIUS: 0.4
+  OPPONENT_DETECTION_IDX: 60
+  OPPONENT_FAR_AWAY_IDX: 100
+  IGNORE_OPPONENT_EP: 10

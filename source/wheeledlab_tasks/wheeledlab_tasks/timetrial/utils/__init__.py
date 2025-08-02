@@ -393,7 +393,7 @@ def generate_random_poses_from_waypoints(env_ids, num_poses, map_levels, env_ori
     
     return poses, current_wps_idx
 
-def find_nearest_waypoint(waypoints: torch.Tensor,  # Shape: [M, 2] - M waypoints
+def find_frenet_coord_along_waypoints(waypoints: torch.Tensor,  # Shape: [M, 2] - M waypoints
                          positions: torch.Tensor, # [N,2] - N environements
                          ) -> tuple[int, torch.Tensor]:
     """

@@ -29,9 +29,9 @@ F1TENTH_4WD_ACTUATOR_CFG = {
         stiffness=0.0,
         damping=100.0,
         friction=0.00,
-        min_delay=0,  # Delays depends on physics step size! e.g. if physics step is 0.025s and max_delay is 2, then the delay is 0.2s.
-        max_delay=0, # 8-12  for dt= 0.025/4, 
-        low_velocity_threshold= 30.0, # [rad/s] Reduced low velocity threshold for 3s system 
+        min_delay=CONFIG['env_config']['MIN_DELAY_THROTTLE'],  # Delays depends on physics step size! e.g. if physics step is 0.025s and max_delay is 2, then the delay is 0.2s.
+        max_delay=CONFIG['env_config']['MAX_DELAY_THROTTLE'], # 8-12  for dt= 0.025/4, 
+        low_velocity_threshold= 25.0, # [rad/s] Reduced low velocity threshold for 3s system 
         low_velocity_effort_limit= 0.15,  # Reduced low velocity effort limit for 3s system
     ),
 }
