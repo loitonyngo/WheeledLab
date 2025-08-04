@@ -122,7 +122,10 @@ class AckermannAction(ActionTerm):
 
         if self._bounding_strategy == 'clip':
             # useful for testing
-            self._processed_actions = torch.clip(actions, min=-1.0, max=1.0) * self._scale + self._offset
+            # self._processed_actions = torch.clip(actions, min=-1.0, max=1.0) * self._scale + self._offset
+            
+            # acceleration mode
+            self._processed_actions = torch.clip(torch.clip(actions, min=-1.0, max=1.0) * torch.tensor([1, 0.40], device=self.device) + self._offset, max=1) 
 
         elif self._bounding_strategy == 'tanh':
             self._processed_actions = torch.tanh(actions) * self._scale + self._offset
@@ -130,16 +133,27 @@ class AckermannAction(ActionTerm):
         else:
             self._processed_actions = actions * self._scale + self._offset
 
-        if self.cfg.no_reverse:
-            self._processed_actions[:, 0] = torch.clamp(self._processed_actions[:, 0], min=0.0)
+        # if self.cfg.no_reverse:
+        #     self._processed_actions[:, 0] = torch.clamp(self._processed_actions[:, 0], min=0.0)
 
 
     def apply_actions(self):
+        
+        #acceleration mode
+        actual_velocity = self._asset.data.root_lin_vel_b[:, 0]
+        new_target_velocity = torch.clamp(self.processed_actions[:, 0] + actual_velocity, min=0.5)
 
         left_rotator_angle, right_rotator_angle, wheel_speeds = self._calculate_ackermann_angles_and_velocities(
-            target_velocity=self.processed_actions[:, 0], # Velocity for all cars
+            target_velocity= new_target_velocity, # Velocity for all cars
             target_steering_angle=self.processed_actions[:, 1] # Steering angle for all cars
         )
+
+        # vel mode
+        # left_rotator_angle, right_rotator_angle, wheel_speeds = self._calculate_ackermann_angles_and_velocities(
+        #     target_velocity= self.processed_actions[:, 0], # Velocity for all cars
+        #     target_steering_angle=self.processed_actions[:, 1] # Steering angle for all cars
+        # )
+        
         front_wheel_angles = torch.stack([left_rotator_angle, right_rotator_angle], dim=1)
 
         self._asset.set_joint_velocity_target(wheel_speeds, joint_ids=self._wheel_ids)

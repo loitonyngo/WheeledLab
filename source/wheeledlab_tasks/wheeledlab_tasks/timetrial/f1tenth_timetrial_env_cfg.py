@@ -102,7 +102,7 @@ def base_lin_vel_x_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sce
     env._base_lin_vel_x_history[:, 1:] = env._base_lin_vel_x_history[:, :-1].clone()
     env._base_lin_vel_x_history[:, 0] = asset.data.root_lin_vel_b[:,0]
     base_lin_vel_x_history = env._base_lin_vel_x_history
-    return base_lin_vel_x_history/8
+    return base_lin_vel_x_history
 
 def base_lin_vel_y_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
     """Root linear velocity in the asset's root frame. 2D, only x and y"""
@@ -120,7 +120,7 @@ def base_lin_vel_y_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sce
     env._base_lin_vel_y_history[:, 1:] = env._base_lin_vel_y_history[:, :-1].clone()
     env._base_lin_vel_y_history[:, 0] = asset.data.root_lin_vel_b[:,1]
     base_lin_vel_y_history = env._base_lin_vel_y_history
-    return base_lin_vel_y_history/8
+    return base_lin_vel_y_history
 
 def base_ang_vel_z_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
     """Root angular velocity in the asset's root frame. Only z, yaw rade"""
@@ -139,7 +139,7 @@ def base_ang_vel_z_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sce
     env._base_ang_vel_z_history[:, 0] = asset.data.root_ang_vel_b[:,2]
     base_ang_vel_z_history = env._base_ang_vel_z_history
     
-    return base_ang_vel_z_history/2
+    return base_ang_vel_z_history
 
 def action_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
     """Root angular velocity in the asset's root frame. Only z, yaw rade"""
@@ -1318,37 +1318,37 @@ class F1TenthTimeTrialEventsCfg:
             mode="reset",
         )
 
-    enhanced_braking = EventTerm(
-        func=mdp.enhanced_braking,
-        params={'k_p': 1,
-                'k_d': 0.0,
-                'min_speed_correction': -0.75},
-        mode="interval",
-        interval_range_s=(0.025, 0.025)
+    # enhanced_braking = EventTerm(
+    #     func=mdp.enhanced_braking,
+    #     params={'k_p': 1,
+    #             'k_d': 0.0,
+    #             'min_speed_correction': -0.75},
+    #     mode="interval",
+    #     interval_range_s=(0.025, 0.025)
         
-    )
+    # )
 
-    enhanced_tc = EventTerm(
-        func=mdp.enhanced_tc,
-        params={'k_p': 0.75,
-                'k_d': 0.0,
-                'k_i': 1,
-                'max_speed_correction': +0.25},
-        mode="interval",
-        interval_range_s=(0.025, 0.025)
+    # enhanced_tc = EventTerm(
+    #     func=mdp.enhanced_tc,
+    #     params={'k_p': 0.75,
+    #             'k_d': 0.0,
+    #             'k_i': 1.0,
+    #             'max_speed_correction': +0.25},
+    #     mode="interval",
+    #     interval_range_s=(0.025, 0.025)
         
-    )
+    # )
 
-    enhanced_rotation = EventTerm(
-        func=mdp.enhanced_rotation,
-        params={'k_p': 0.3,
-                'k_d': 0.5,
-                'k_i': 0
-                },
-        mode="interval",
-        interval_range_s=(0.025, 0.025)
+    # enhanced_rotation = EventTerm(
+    #     func=mdp.enhanced_rotation,
+    #     params={'k_p': 0.5,
+    #             'k_d': 0.5,
+    #             'k_i': 0
+    #             },
+    #     mode="interval",
+    #     interval_range_s=(0.025, 0.025)
         
-    )
+    # )
 
     # store_data = EventTerm( 
     #     func= store_data,
@@ -1489,7 +1489,7 @@ def wall_collision_penalty(env):
         # Update the collision_bool tensor for these environments
         collision_bool[env_mask] = collisions_in_map
 
-    return torch.where(collision_bool.bool(), -1*forward_vel(env)**2, 0)
+    return torch.where(collision_bool.bool(), -1, 0)
     # return torch.where(collision_bool.bool(), -1, 0)
 
 
@@ -1875,14 +1875,44 @@ def delta_throttle_l2_penalty(env):
             device=env.device
             )
         
-    delta_throttle_l2 = -(env._action_history[:, 0, 0] - env._action_history[:, 1, 0])**2
+    delta_throttle_l2 = -((env._action_history[:, 0, 0] - env._action_history[:, 1, 0])/8)**2
     
     return delta_throttle_l2 # speed target
 
-def offset_throttle_penalty(env):
+def delta_steering_l2_penalty(env):
+    # last_throttle_action = mdp.last_action(env)[..., 0]*env.cfg.actions.throttle_steer.scale[0]
+    last_steering_action = mdp.last_action(env)[..., 1]
+    if not hasattr(env, '_action_history'):
+        env._action_history_length = CONFIG['env_config']['ACTION_HISTORY_LENGTH']
+        env._action_history = torch.zeros(
+            (env.num_envs, env._action_history_length, 2),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+            )
+        
+    delta_steering_l2_penalty = -((env._action_history[:, 0, 1] - env._action_history[:, 1, 1]))**2
+    
+    return delta_steering_l2_penalty # speed target
+
+# def delta_throttle_l2_penalty(env):
+#     # last_throttle_action = mdp.last_action(env)[..., 0]*env.cfg.actions.throttle_steer.scale[0]
+#     last_throttle_action = mdp.last_action(env)[..., 0]
+#     if not hasattr(env, '_action_history'):
+#         env._action_history_length = CONFIG['env_config']['ACTION_HISTORY_LENGTH']
+#         env._action_history = torch.zeros(
+#             (env.num_envs, env._action_history_length, 2),  # Shape: (num_envs, history_length, n_actions)
+#             dtype=torch.float32,
+#             device=env.device
+#             )
+        
+#     delta_throttle_l2 = -(env._action_history[:, 0, 0] - env._action_history[:, 1, 0])**2
+    
+#     return delta_throttle_l2 # speed target
+
+def delta_speed_cmd_penalty(env):
     # last_throttle_action = mdp.last_action(env)[..., 0]*env.cfg.actions.throttle_steer.scale[0]
     last_throttle_action = mdp.last_action(env)[..., 0]
-    last_speed_cmd = last_throttle_action*CONFIG['env_config']['MAX_SPEED_SCALING']+CONFIG['env_config']['SPEED_OFFSET'] #-1,1 mapped to 0-8
+    last_speed_cmd = torch.clamp(last_throttle_action*CONFIG['env_config']['MAX_SPEED_SCALING']+CONFIG['env_config']['SPEED_OFFSET'], min=0, max=CONFIG['env_config']['MAX_SPEED_SCALING']) #-1,1 mapped to 0-8
     speed = mdp.base_lin_vel(env)[..., 0]
     if not hasattr(env, '_action_history'):
         env._action_history_length = CONFIG['env_config']['ACTION_HISTORY_LENGTH']
@@ -1892,9 +1922,9 @@ def offset_throttle_penalty(env):
             device=env.device
             )
         
-    offset_throttle = last_speed_cmd - speed
+    offset_speed_cmd_penalty = -(last_speed_cmd - speed)**2
     
-    return -(offset_throttle)**2 # if speed command is above actual speed, penalize
+    return offset_speed_cmd_penalty # if speed command is above actual speed, penalize
 
 def speed_target_rew(env, speed_target: float=1.):
     lin_vel = mdp.base_lin_vel(env)[..., :2]
@@ -1931,20 +1961,21 @@ class F1TenthTimeTrialRewardsCfg:
         weight=1,
     )
 
-    # negative_throttle_penalty =  RewTerm(
-    #     func=negative_throttle_penalty,
-    #     weight=1,
-    # )
-    
+
     delta_throttle_l2_penalty =  RewTerm(
         func=delta_throttle_l2_penalty,
-        weight=0.0,
+        weight=0.001,
     )
     
-    offset_throttle_penalty =  RewTerm(
-        func=offset_throttle_penalty,
-        weight=0.0,
+    delta_steering_l2_penalty =  RewTerm(
+        func=delta_steering_l2_penalty,
+        weight=0.0001,
     )
+    
+    # delta_speed_cmd_penalty =  RewTerm(
+    #     func=delta_speed_cmd_penalty,
+    #     weight=0.000,
+    # )
     
     # opponent_overtake_closing_reward = RewTerm(
     #     func=opponent_overtake_closing_reward,
@@ -1979,38 +2010,49 @@ class F1TenthTimeTrialRewardsCfg:
 @configclass
 class TimeTrialCurriculumCfg:
 
-    # more_out_of_bounds_penalty = CurrTerm(
-    #     func=increase_reward_weight_over_time,
-    #     params={
-    #         "reward_term_name": "out_of_track",
-    #         "weight_increase": 0,
-    #         "first_episode_increase": 50,
-    #         "episodes_per_increase": 50,
-    #         "max_num_increases": 0,
-    #     }
-    # )
+    more_out_of_bounds_penalty = CurrTerm(
+        func=increase_reward_weight_over_time,
+        params={
+            "reward_term_name": "out_of_track",
+            "weight_increase": 0,
+            "first_episode_increase": 50,
+            "episodes_per_increase": 50,
+            "max_num_increases": 0,
+        }
+    )
 
     delta_throttle_l2_penalty = CurrTerm(
         func=increase_reward_weight_over_time,
         params={
             "reward_term_name": "delta_throttle_l2_penalty",
-            "weight_increase": 0.0,
+            "weight_increase": 0.1,
             "first_episode_increase": 5,
             "episodes_per_increase": 5,
             "max_num_increases": 5,
         }
     )
-
-    offset_throttle_penalty = CurrTerm(
+    
+    delta_steering_l2_penalty = CurrTerm(
         func=increase_reward_weight_over_time,
         params={
-            "reward_term_name": "offset_throttle_penalty",
-            "weight_increase": 0.0,
-            "first_episode_increase": 2,
+            "reward_term_name": "delta_steering_l2_penalty",
+            "weight_increase": 0.01,
+            "first_episode_increase": 10,
             "episodes_per_increase": 5,
-            "max_num_increases": 2,
+            "max_num_increases": 5,
         }
     )
+
+    # delta_speed_cmd_penalty = CurrTerm(
+    #     func=increase_reward_weight_over_time,
+    #     params={
+    #         "reward_term_name": "delta_speed_cmd_penalty",
+    #         "weight_increase": 0.01,
+    #         "first_episode_increase": 16,
+    #         "episodes_per_increase": 4,
+    #         "max_num_increases": 10,
+    #     }
+    # )
     
     # less_traversability = CurrTerm(
     #     func=increase_reward_weight_over_time,
