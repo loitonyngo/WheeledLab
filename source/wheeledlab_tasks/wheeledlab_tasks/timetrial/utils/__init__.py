@@ -71,10 +71,10 @@ def create_maps_from_waypoints(maps_folder_path, map_name_list, origin_list, sta
         )
         
         # Set USD elements
-        set_hashmap_usd(
-            map_name, hashmap, origin_list[i], map_size_pixels, 
-            map_size_meters, stage, x_min, x_max, y_min, y_max, res
-        )
+        # set_hashmap_usd(
+        #     map_name, hashmap, origin_list[i], map_size_pixels, 
+        #     map_size_meters, stage, x_min, x_max, y_min, y_max, res
+        # )
         
         # Convert points to USD coordinates
         waypoints_usd = set_points_usd(
@@ -91,7 +91,7 @@ def create_maps_from_waypoints(maps_folder_path, map_name_list, origin_list, sta
         )
         
         # Store results (convert to lists at the end)
-        hashmap_list.append(hashmap)
+        hashmap_list.append([])
         waypoints_list.append([[p[0], p[1], p[2]] for p in waypoints_usd])
         outer_list.append([[p[0], p[1], p[2]] for p in outer_usd])
         inner_list.append([[p[0], p[1], p[2]] for p in inner_usd])
@@ -102,16 +102,16 @@ def create_maps_from_waypoints(maps_folder_path, map_name_list, origin_list, sta
         spacing_meters_list.append([res, res])
         map_size_pixels_list.append(map_size_pixels)
         
-        # Add to traversability hashmap
-        TraversabilityHashmapUtil().add_traversability_hashmap(
-            i, hashmap.tolist(), map_size_pixels, (res, res), origin_list[i]
-        )
+        # # Add to traversability hashmap
+        # TraversabilityHashmapUtil().add_traversability_hashmap(
+        #     i, hashmap.tolist(), map_size_pixels, (res, res), origin_list[i]
+        # )
 
     # Save stage
     stage.GetRootLayer().Save()
 
     return (
-        [h.tolist() for h in hashmap_list],  # Convert all numpy arrays to lists at the end
+        # [h.tolist() for h in hashmap_list],  # Convert all numpy arrays to lists at the end
         waypoints_list,
         outer_list,
         inner_list,
@@ -201,7 +201,7 @@ def generate_random_poses_from_list(env_ids, num_poses, map_levels, env_origins,
     
     return poses, current_wps_idx
 
-def generate_start_idx_poses_from_list(env_ids, num_poses, map_levels, env_origins, map_origin_list, row_spacing_list, col_spacing_list, traversability_hashmap_list, waypoints_usd_list, outer_usd_list, inner_usd_list, margin=0.1):
+def generate_start_idx_poses_from_list(env_ids, num_poses, map_levels, env_origins, row_spacing_list, col_spacing_list, traversability_hashmap_list, waypoints_usd_list, outer_usd_list, inner_usd_list, margin=0.1):
     """
     Generate random poses with vectorized operations, supporting multiple hashmaps based on map_level.
     Only generates poses for environments specified in env_ids.
@@ -252,7 +252,6 @@ def generate_start_idx_poses_from_list(env_ids, num_poses, map_levels, env_origi
         inner_xy = torch.tensor(inner_usd_list[map_level])[:, :2].to(torch.float32)
 
         # Vectorized angle computation
-        positions = torch.stack([torch.tensor(xs), torch.tensor(ys)], dim=-1) + torch.tensor(map_origin_list[map_level][:2])
         current_indices = 0
         current_wps_idx[env_mask] = current_indices
 
@@ -267,8 +266,8 @@ def generate_start_idx_poses_from_list(env_ids, num_poses, map_levels, env_origi
         angles = torch.rad2deg(torch.atan2(deltas[1], deltas[0])) 
         
         # Shift the coordinates according to env_origins for the reset
-        xs_shifted = xs + env_origins[current_env_ids, 0].cpu().numpy() + np.array(map_origin_list)[map_level, 0]
-        ys_shifted = ys + env_origins[current_env_ids, 1].cpu().numpy() + np.array(map_origin_list)[map_level, 1]
+        xs_shifted = xs + env_origins[current_env_ids, 0].cpu().numpy() 
+        ys_shifted = ys + env_origins[current_env_ids, 1].cpu().numpy() 
         
         # Store results in the output arrays at the correct positions
         all_xs_shifted[env_mask] = xs_shifted
@@ -327,7 +326,7 @@ def generate_random_poses(env_origins, env_ids, num_poses, row_spacing, col_spac
     
     return poses
 
-def generate_random_poses_from_waypoints(env_ids, num_poses, map_levels, env_origins, map_origin_list, waypoints_usd_list, inner_usd_list, max_radius_offset=1):
+def generate_random_poses_from_waypoints(env_ids, num_poses, map_levels, env_origins, waypoints_usd_list, inner_usd_list, max_radius_offset=1):
     """
     Generate random poses by selecting from waypoints, supporting multiple maps based on map_level.
     Only generates poses for environments specified in env_ids.
@@ -379,8 +378,8 @@ def generate_random_poses_from_waypoints(env_ids, num_poses, map_levels, env_ori
         angles = torch.rad2deg(torch.atan2(deltas[:, 1], deltas[:, 0])) + np.random.uniform(-15, 15, size=len(current_env_ids))
         
         # Shift the coordinates according to env_origins for the reset
-        xs_shifted = xs + env_origins[current_env_ids, 0].cpu().numpy() + np.array(map_origin_list)[map_level, 0]
-        ys_shifted = ys + env_origins[current_env_ids, 1].cpu().numpy() + np.array(map_origin_list)[map_level, 1] 
+        xs_shifted = xs + env_origins[current_env_ids, 0].cpu().numpy() 
+        ys_shifted = ys + env_origins[current_env_ids, 1].cpu().numpy() 
         
         # Store results in the output arrays at the correct positions
         all_xs_shifted[env_mask] = xs_shifted

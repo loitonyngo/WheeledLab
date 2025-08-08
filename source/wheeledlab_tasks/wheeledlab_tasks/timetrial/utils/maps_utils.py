@@ -118,12 +118,14 @@ def create_square_drivable_map_v2(min_map_size, outer, inner, resolution=0.2):
     # Drivable = inside outer AND outside inner
     drivable = (in_outer & ~in_inner).reshape(grid_x.shape)
     
-    return (drivable, 
+    return (
+            drivable, 
             map_size_meters, 
             map_size_pixels, 
             (x_min, x_max), 
             (y_min, y_max), 
-            resolution)
+            resolution
+            )
 
 def create_square_drivable_map(outer, inner, resolution=0.5):
     """Create square boolean hashmap of drivable areas."""

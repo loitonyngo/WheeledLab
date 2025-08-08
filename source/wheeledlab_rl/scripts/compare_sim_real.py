@@ -30,15 +30,15 @@ parser = argparse.ArgumentParser(description="Play a policy in WheeledLab.")
 ###### DEFINE POLICY TO PLAY ######
 ###################################
 DEFAULT_LOGS_PATH = "/home/tongo/WheeledLab/source/wheeledlab_rl/logs/"
-POLICY = 'driven-butterfly-1178'
+POLICY = 'major-eon-1288'
 SAVE_NAME = 'test'
 SAVE_DIR = '/home/tongo/WheeledLab/source/wheeledlab_rl/logs_play_policy'
 TIMESTAMP = datetime.now().strftime("%m%d_%H%M")
 
 REAL_DATA_DIR = "/home/tongo/WheeledLab/source/wheeledlab_rl/real_data/"
 REAL_DATA_NAME = "bb_speed_3_angle_3_p_2.csv"
-REAL_DATA_NAME = "THETRACK_model650.csv"
-# REAL_DATA_NAME = "speed_5_angle_0.csv"
+# REAL_DATA_NAME = "THETRACK_MAP_2.csv"
+# REAL_DATA_NAME = "speed_3_angle_0.csv"
 
 REAL_DATA_PATH = os.path.join(REAL_DATA_DIR, REAL_DATA_NAME)
 ###################################
@@ -56,7 +56,7 @@ parser.add_argument("--task", type=str, default=None, help="Task name. Overrides
 parser.add_argument("--policy-path", type=str, default=None, help="Path to policy file.")
 
 # Playback
-parser.add_argument("--steps", type=int, default=200, help="Length of recorded video in steps")
+parser.add_argument("--steps", type=int, default=115, help="Length of recorded video in steps")
 # Logging
 parser.add_argument('-sd', "--save-data", action="store_true", default=True, help="Save episode data")
 parser.add_argument("--save-name", type=str, default=SAVE_NAME, help="Name save file.")
@@ -133,7 +133,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     print(f"[INFO] Created playback directory: {playback_dir}")
 
     ####################################
-    #### POLICY LOADING CODE ####
+    ######## POLICY LOADING CODE #######
     ####################################
 
     env = gym.make(task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
@@ -180,7 +180,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
         's_idx_max': [],
         'inner_bounds': [],
         'outer_bounds': [],
-        'throttle_joints_applied_effort': []
+        'throttle_joints_applied_effort': [],
+        'vel_y_calc': []  
     }
 
     ### PLAY POLICY ###
@@ -222,14 +223,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
         with torch.inference_mode():
             actions = policy(obs)
 
-            MAX_SPEED = 10
+            MAX_SPEED = 8
             MAX_ANGLE = 0.40
-            CMD_TO_REAL_MULTIPLIER_SPEED = 1  # This is the multiplier to convert command speed to real speed
+            CMD_TO_REAL_MULTIPLIER_SPEED = 1.2  # This is the multiplier to convert command speed to real speed
             CMD_TO_REAL_MULTIPLIER_ANGLE = 1  # This is the multiplier to convert command angle to real angle
-
             actions[:,0] = cmd_velocity_resampled[time_idx+1]/MAX_SPEED / CMD_TO_REAL_MULTIPLIER_SPEED
             actions[:,1] = cmd_steering_resampled[time_idx+1]/MAX_ANGLE / CMD_TO_REAL_MULTIPLIER_ANGLE
-
             # env stepping
             obs, rew, _, extras = env.step(actions)
         # save data
@@ -247,6 +246,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
         try:
             data['vel_x'].append(extras['vel_x'])
             data['vel_y'].append(extras['vel_y'])
+            data['vel_y_calc'].append(extras['vel_y_calc'])
             data['yaw_rate'].append(extras['yaw_rate'])
         except:
             print('WARNING: could not store data')
@@ -333,6 +333,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     pos_xy = torch.squeeze(data['pos_xy']).cpu().numpy() 
     vel_x = torch.squeeze(data['vel_x']).cpu().numpy() 
     vel_y = torch.squeeze(data['vel_y']).cpu().numpy() 
+    vel_y_calc = torch.squeeze(data['vel_y_calc']).cpu().numpy()
     yaw_rate = torch.squeeze(data['yaw_rate']).cpu().numpy() 
     throttle_joints_applied_effort = torch.squeeze(data['throttle_joints_applied_effort']).cpu().numpy() 
     
@@ -357,13 +358,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
         (real_data['Time'] >= global_start) & 
         (real_data['Time'] <= global_end)
     ]
-
+    real_data['theta'] = real_data['theta'] - real_data['theta'].iloc[0]  # Normalize theta to start from 0
+    
     # # Trim simulated data (assuming 'time' is a 1D array)
     sim_mask = (time >= global_start) & (time <= global_end)
     sim_mask = time <= global_end
 
     s_idx = s_idx[sim_mask]  # Trim s_idx accordingly
     theta = theta[sim_mask]  # Trim theta accordingly
+    theta = theta - theta[0]  # Normalize theta to start from 0
     time = time[sim_mask]
     observations = observations[sim_mask]  # Trim observations accordingly
     actions = actions[sim_mask]           # Trim actions accordingly
@@ -377,6 +380,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     jerk = jerk[sim_mask]
     vel_x = vel_x[sim_mask]
     vel_y = vel_y[sim_mask]
+    vel_y_calc = vel_y_calc[sim_mask]
     yaw_rate = yaw_rate[sim_mask]
 
     from scipy.interpolate import interp1d
@@ -469,6 +473,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
 
     ax2.plot(time[start_idx:end_idx], -vel_y[start_idx:end_idx], 
             color='b', label='Lin Vel Y (sim)')
+    ax2.plot(time[start_idx:end_idx], vel_y_calc[start_idx:end_idx], 
+            color='cyan', label='Lin Vel Y (calculated)')
+    
     ax2.plot(real_data['Time'], real_data['vy'], 
             label='Vel Y (real)', color='b', linestyle='--')
 

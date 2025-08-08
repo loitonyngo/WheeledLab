@@ -26,7 +26,7 @@ def reset_root_state_random(
                                     dtype=torch.long,
                                     device=env.device)
         
-    env._map_levels[env_ids] = torch.tensor(np.floor(np.random.rand(len(env_ids))*len(env.cfg.scene.terrain.traversability_hashmap_list)), device = env.device, dtype=torch.long)
+    env._map_levels[env_ids] = torch.tensor(np.floor(np.random.rand(len(env_ids))*len(env.cfg.scene.terrain.map_name_list)), device = env.device, dtype=torch.long)
 
     # valid_poses = terrain.cfg.generate_poses_from_init_points(env, env_ids)
     valid_poses, current_idx_np = terrain.cfg.generate_random_poses_from_waypoints(env=env, env_ids=env_ids, num_poses=len(env_ids), max_radius_offset=0.5)
@@ -113,6 +113,14 @@ def reset_root_state_random(
             device=env.device
         )
 
+    if not hasattr(env, '_target_velocity_history'):
+        env._target_velocity_history = torch.zeros(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )
+        
+        
     # set boolean so that it knows it just resetted
     env._initial_waypoint_indices[env_ids] = current_idx.clone()  
     env._reset_env_bool[env_ids] = torch.ones(len(env_ids), dtype=bool, device=env.device)
@@ -122,6 +130,7 @@ def reset_root_state_random(
     env._base_lin_vel_x_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
     env._base_lin_vel_y_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
     env._base_ang_vel_z_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
+    env._target_velocity_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
 
     env._traversability_history[env_ids, :] = torch.ones((len(env_ids), env._rew_history_length), dtype=torch.long, device=env.device)
 
@@ -275,6 +284,13 @@ def reset_root_state_start_idx(
             device=env.device
         )
 
+    if not hasattr(env, '_target_velocity_history'):
+        env._target_velocity_history = torch.zeros(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )
+        
     # set boolean so that it knows it just resetted
     env._initial_waypoint_indices[env_ids] = current_idx.clone()  
     env._reset_env_bool[env_ids] = torch.ones(len(env_ids), dtype=bool, device=env.device)
@@ -284,5 +300,6 @@ def reset_root_state_start_idx(
     env._base_lin_vel_x_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
     env._base_lin_vel_y_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
     env._base_ang_vel_z_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
+    env._target_velocity_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
 
     env._traversability_history[env_ids, :] = torch.ones((len(env_ids), env._rew_history_length), dtype=torch.long, device=env.device)

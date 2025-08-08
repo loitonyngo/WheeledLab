@@ -1,19 +1,25 @@
 # config.yaml
 env_config:
   MAP_NAME_LIST: ['THETRACK']
-  ORIGIN_LIST: [[0, 0], [28, 0], [0, 28], [28, 28]]
-  
-  DYNAMIC_FRICTION: 0.7
-  STATIC_FRICTION: 0.7
+  ORIGIN_LIST: [[0, 0], [0, 0], [0, 0], [28, 28]]
+
+  # When comparing real data that don't use incremental it must always be set to False
+  INCREMENTAL_MODE: True
+  MAX_SPEED_INCREMENT: 0.12
+
+  VD_ENHANCED: False
+
+  DYNAMIC_FRICTION: 0.70
+  STATIC_FRICTION: 0.70
   RESTITUTION: 0.0
 
   CONSTANT_SPEED: False
   CONSTANT_SPEED_TARGET: 5
 
   # usually both true
-  NON_TRAVERSABLE_TERMINATION: False
-  RESET_RANDOM: False
-
+  NON_TRAVERSABLE_TERMINATION: True
+  RESET_RANDOM: True
+  
   MAX_SPEED_SCALING: 8
   MAX_STEERING_SCALING: 0.40
   SPEED_OFFSET: 0
@@ -41,13 +47,13 @@ env_config:
   # PROGRESS_HISTORY_LENGTH: Number of last waypoints to store in the history buffer, every every SIM_DECIMATION*SIM_DT seconds.
   # PROGRESS_HISTORY_CHECKPOINT_IDX: Index of the last checkpoint in the history buffer used to compute the difference in progress
   PROGRESS_HISTORY_LENGTH: 20
-  PROGRESS_HISTORY_CHECKPOINT_IDX: 3
+  PROGRESS_HISTORY_CHECKPOINT_IDX: 4
 
-  ACTION_HISTORY_LENGTH: 4
-  OBS_HISTORY_LENGTH: 4
-  REW_HISTORY_LENGTH: 4
+  ACTION_HISTORY_LENGTH: 10
+  OBS_HISTORY_LENGTH: 10
+  REW_HISTORY_LENGTH: 10
 
-  WALL_COLLISION_RADIUS: 0.25
+  WALL_COLLISION_RADIUS: 0.26
   
   MAX_PROGRESS_IDX: 30 
 
@@ -59,6 +65,19 @@ env_config:
   N_HORIZON: 20
 
   
+
+
+
+
+
+
+
+
+
+
+
+
+
   OPP_COLLISION_RADIUS: 0.4
   OPPONENT_DETECTION_IDX: 60
   OPPONENT_FAR_AWAY_IDX: 100

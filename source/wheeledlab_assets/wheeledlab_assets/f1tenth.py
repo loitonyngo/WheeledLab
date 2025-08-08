@@ -53,7 +53,7 @@ _ZERO_INIT_STATES = ArticulationCfg.InitialStateCfg(
 # Overall configuration tying together the asset, physics, and initial state.
 F1TENTH_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{WHEELEDLAB_ASSETS_DATA_DIR}/Robots/F1TENTH/f1tenth_ego.usd",
+        usd_path=f"{WHEELEDLAB_ASSETS_DATA_DIR}/Robots/F1TENTH/f1tenth_mod.usd",
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             rigid_body_enabled=True,
             linear_damping=None,

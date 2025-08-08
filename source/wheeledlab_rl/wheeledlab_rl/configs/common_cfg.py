@@ -44,10 +44,10 @@ class TrainConfig:
     ''' Configuration for training '''
     seed: int = 0                       # Seed used for the environment
     device: str = "cuda:0"              # Device to use
-    load_run: Optional[str] = None    # Load a previously trained model
-    load_run_checkpoint: int = 0        # Load a specific checkpoint from a previously trained model
-    # load_run: Optional[str] = "tough-salad-1174"      # Load a previously trained model
-    # load_run_checkpoint: int = 500        # Load a specific checkpoint from a previously trained model
+    # load_run: Optional[str] = None    # Load a previously trained model
+    # load_run_checkpoint: int = 0        # Load a specific checkpoint from a previously trained model
+    load_run: Optional[str] = "volcanic-butterfly-1296"      # Load a previously trained model
+    load_run_checkpoint: int = 350        # Load a specific checkpoint from a previously trained model
 
     log: LogConfig = LogConfig()
 

@@ -11,6 +11,10 @@ from isaaclab.utils import configclass
 
 from . import ackermann_actions, rc_car_actions
 
+import yaml
+with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/timetrial/config/f1tenth_timetrial_config.yaml", "r") as f:
+    CONFIG = yaml.safe_load(f)
+    
 @configclass
 class AckermannActionCfg(ActionTermCfg):
     """Configuration for the Ackermann steering action term.
@@ -64,4 +68,8 @@ class RCCarRWDActionCfg(AckermannActionCfg):
 @configclass
 class RCCar4WDActionCfg(AckermannActionCfg):
 
-    class_type: type[ActionTerm] = rc_car_actions.RCCar4WDAction
+    if CONFIG['env_config']['INCREMENTAL_MODE']:
+        class_type: type[ActionTerm] = rc_car_actions.RCCar4WDIncrementalAction
+    else:
+        class_type: type[ActionTerm] = rc_car_actions.RCCar4WDAction
+

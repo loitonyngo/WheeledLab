@@ -118,7 +118,7 @@ def base_lin_vel_y_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sce
             )
     # shift the history to the right and insert the last angular velocity at the beginning
     env._base_lin_vel_y_history[:, 1:] = env._base_lin_vel_y_history[:, :-1].clone()
-    env._base_lin_vel_y_history[:, 0] = asset.data.root_lin_vel_b[:,1]
+    env._base_lin_vel_y_history[:, 0] = -asset.data.root_lin_vel_b[:,1]
     base_lin_vel_y_history = env._base_lin_vel_y_history
     return base_lin_vel_y_history
 
@@ -141,6 +141,25 @@ def base_ang_vel_z_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sce
     
     return base_ang_vel_z_history
 
+def target_velocity_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
+    # extract the used quantities (to enable type-hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
+    if not hasattr(env, '_target_velocity_history'):
+        env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
+        env._target_velocity_history = torch.zeros(
+            (env.num_envs, env._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+            )
+    
+    last_action = mdp.last_action(env)[..., 0]*CONFIG['env_config']['MAX_SPEED_INCREMENT']
+    # # shift the history to the right and insert the last angular velocity at the beginning
+    env._target_velocity_history[:, 1:] = env._target_velocity_history[:, :-1].clone()
+    env._target_velocity_history[:, 0] = torch.clamp(env._target_velocity_history[:, 0] + last_action, min = 0.0)
+    target_velocity_history = env._target_velocity_history
+    return target_velocity_history
+#last action is from -1 and 1, not clipped
 def action_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
     """Root angular velocity in the asset's root frame. Only z, yaw rade"""
     # extract the used quantities (to enable type-hinting)
@@ -161,84 +180,6 @@ def action_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntity
     action_history_obs = env._action_history.reshape(-1, env._action_history_length * 2)  # Flatten the history for observation
 
     return action_history_obs 
-
-
-def wheel_slip(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
-    # extract the used quantities (to enable type-hinting)
-    asset: RigidObject = env.scene[asset_cfg.name]
-    noise = torch.empty(size=asset.data.root_lin_vel_b[:,0].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
-    
-    lin_vel_w = asset.data.body_com_lin_vel_w.squeeze(1)
-    ang_vel_w =asset.data.body_com_ang_vel_w.squeeze(1)
-    quat_w = asset.data.body_link_quat_w.squeeze(1)
-
-    # TO DO USE WHEELS INDEXES 1,3,5,6
-    wheels_lin_vel_body_frame = quat_rotate_inverse(quat_w, lin_vel_w)[:, [1, 3, 5, 6]] # (num_instances, 3)
-    wheels_ang_vel_body_frame = quat_rotate_inverse(quat_w, ang_vel_w)[:, [1, 3, 5, 6]] # (num_instances, 3)
-    lin_vel_root=asset.data.root_lin_vel_b
-    
-    # TO DO CHANGE TO IMPLEMENT WHEEL SLIP OBS
-    return wheels_ang_vel_body_frame[:, :, 1]
-
-def wheel_slip_2(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
-    # extract the used quantities (to enable type-hinting)
-    asset: RigidObject = env.scene[asset_cfg.name]
-    noise = torch.empty(size=asset.data.root_lin_vel_b[:,0].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
-    
-    lin_vel_w = asset.data.body_com_lin_vel_w.squeeze(1)
-    ang_vel_w =asset.data.body_com_ang_vel_w.squeeze(1)
-    quat_w = asset.data.body_link_quat_w.squeeze(1)
-    
-    # Get base frame orientation (assuming index 0 is the base)
-    base_quat = quat_w[:, 0:1]  # (num_instances, 1, 4)
-
-    # TO DO USE WHEELS INDEXES 1,3,5,6
-    wheels_lin_vel_body_frame = quat_rotate_inverse(base_quat, lin_vel_w)[:, [1, 3, 5, 6]] # (num_instances, 3)
-    wheels_ang_vel_body_frame = quat_rotate_inverse(base_quat, ang_vel_w)[:, [1, 3, 5, 6]] # (num_instances, 3)
-    lin_vel_root=asset.data.root_lin_vel_b
-
-    
-    # TO DO CHANGE TO IMPLEMENT WHEEL SLIP OBS
-    return wheels_lin_vel_body_frame[:, :, 0]
-
-def wheel_slip_3(
-    env: ManagerBasedEnv, 
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), 
-    mean_noise: float = 0, 
-    std_noise: float = 0
-) -> torch.Tensor:
-    # Extract the used quantities (to enable type-hinting)
-    asset: RigidObject = env.scene[asset_cfg.name]
-    
-    # Generate noise (if needed)
-    noise = torch.empty(
-        size=asset.data.root_lin_vel_b[:, 0].unsqueeze(-1).shape, 
-        device=env.device
-    ).normal_(mean=mean_noise, std=std_noise)
-    
-    # Get body velocities and orientation
-    lin_vel_w = asset.data.body_com_lin_vel_w.squeeze(1)  # (num_instances, 3)
-    ang_vel_w = asset.data.body_com_ang_vel_w.squeeze(1)   # (num_instances, 3)
-    quat_w = asset.data.body_link_quat_w.squeeze(1)        # (num_instances, 4)
-    
-    # Rotate velocities to body frame (select wheels 1, 3, 5, 6)
-    wheels_ang_vel_body_frame = quat_rotate_inverse(quat_w, ang_vel_w)[:, [1, 3, 5, 6]]  # (num_instances, 4, 3)
-    
-    # Compute the norm (magnitude) of each wheel's angular velocity
-    wheels_ang_vel_norm = torch.norm(wheels_ang_vel_body_frame, dim=2)  # (num_instances, 4)
-    
-    return wheels_ang_vel_norm
-
-def quat_rotate(q, v):
-    # q shape: (..., 4), v shape: (..., 3)
-    q_vec = q[..., 1:]  # (x, y, z)
-    uv = torch.cross(q_vec, v, dim=-1)
-    uuv = torch.cross(q_vec, uv, dim=-1)
-    return v + 2 * (q[..., 0:1] * uv + uuv)
-
-def quat_rotate_inverse(q, v):
-    q_inv = torch.cat([q[..., 0:1], -q[..., 1:]], dim=-1)  # Inverse = conjugate for unit quat
-    return quat_rotate(q_inv, v)
 
 def deviation_centerline_horizon(
     env: ManagerBasedEnv, 
@@ -999,7 +940,7 @@ class F1TenthTimeTrialObsCfg:
     @configclass
     class PolicyCfg(ObsGroup):
         """
-        [vx, vy, vz, wx, wy, wz, action1(vel), action2(steering)]
+        [vx, wz, action1(vel), action2(steering), ...]
         """
         # lidar = ObsTerm(func=mdp_sensors.lidar_ranges, params={"sensor_cfg":SceneEntityCfg("lidar")})
         base_lin_vel_x_history = ObsTerm(
@@ -1019,7 +960,13 @@ class F1TenthTimeTrialObsCfg:
             params={'mean_noise': 0,
                     'std_noise': 0}         
             )
-        
+
+        target_velocity_history = ObsTerm(
+            func=target_velocity_history, 
+            params={'mean_noise': 0,
+                    'std_noise': 0}         
+            )
+             
         # last_action = ObsTerm(
         #     func=mdp.last_action,
         #     clip=(-1., 1.), # TODO: get from ClipAction wrapper
@@ -1029,24 +976,7 @@ class F1TenthTimeTrialObsCfg:
         action_history = ObsTerm(
             func=action_history,
         )
-        # wheel_slip = ObsTerm(
-        #     func=wheel_slip,
-        #     params={'mean_noise': 0,
-        #             'std_noise': 0}      
-        #     )
 
-        # wheel_slip_2 = ObsTerm(
-        #     func=wheel_slip_2,
-        #     params={'mean_noise': 0,
-        #             'std_noise': 0}      
-        #     )
-        
-        # wheel_slip_3 = ObsTerm(
-        #     func=wheel_slip_3,
-        #     params={'mean_noise': 0,
-        #             'std_noise': 0}      
-        #     )
-                
         heading_error = ObsTerm(
             func=heading_error_horizon,
             params={'delta_s_idx': DELTA_S_IDX,
@@ -1153,9 +1083,9 @@ class F1TenthTimeTrialTerrainImporterCfg(TerrainImporterCfg):
         map_levels = env._map_levels
         # add which map level
 
-        init_poses, init_current_wps_idx = generate_random_poses_from_waypoints(env_ids, num_poses, map_levels, env_origins, self.origin_list, self.waypoints_list, self.inner_list, max_radius_offset=0.3)
+        init_poses, init_current_wps_idx = generate_random_poses_from_waypoints(env_ids, num_poses, map_levels, env_origins, self.waypoints_list, self.inner_list, max_radius_offset=0.3)
         # init_poses, init_current_wps_idx = generate_random_poses_from_list(env_ids, num_poses, map_levels, env_origins, self.origin_list, self.row_spacing_list, self.col_spacing_list, self.traversability_hashmap_list, self.waypoints_list, self.outer_list, self.inner_list, margin=0.1)
-        max_radius_offset = 0.75
+        max_radius_offset = 0.5
         valid_init_poses = [
             InitialPoseCfg(
                 pos=(x + random.uniform(-1,1)*max_radius_offset, y + random.uniform(-1,1)*max_radius_offset, 0.02),
@@ -1171,7 +1101,7 @@ class F1TenthTimeTrialTerrainImporterCfg(TerrainImporterCfg):
         map_levels = env._map_levels
         # add which map level
 
-        init_poses, init_current_wps_idx = generate_start_idx_poses_from_list(env_ids, num_poses, map_levels, env_origins, self.origin_list, self.row_spacing_list, self.col_spacing_list, self.traversability_hashmap_list, self.waypoints_list, self.outer_list, self.inner_list, margin=0.1)
+        init_poses, init_current_wps_idx = generate_start_idx_poses_from_list(env_ids, num_poses, map_levels, env_origins, self.row_spacing_list, self.col_spacing_list, self.traversability_hashmap_list, self.waypoints_list, self.outer_list, self.inner_list, margin=0.1)
         valid_init_poses = [
             InitialPoseCfg(
                 pos=(x, y, 0.02),
@@ -1294,10 +1224,6 @@ def store_data(
     env.extras['s_idx_max'] = torch.tensor(num_waypoints-1, device=env.device)
 
 
-
-
-
-
 @configclass
 class F1TenthTimeTrialEventsCfg:
     
@@ -1318,36 +1244,46 @@ class F1TenthTimeTrialEventsCfg:
             mode="reset",
         )
 
-    # enhanced_braking = EventTerm(
-    #     func=mdp.enhanced_braking,
-    #     params={'k_p': 1,
-    #             'k_d': 0.0,
-    #             'min_speed_correction': -0.75},
-    #     mode="interval",
-    #     interval_range_s=(0.025, 0.025)
-        
-    # )
+    # if CONFIG['env_config']['VD_ENHANCED']:
+    #     enhanced_braking = EventTerm(
+    #         func=mdp.enhanced_braking,
+    #         params={'k_p': 1,
+    #                 'k_d': 0.2,
+    #                 'min_speed_correction': -0.75},
+    #         mode="interval",
+    #         interval_range_s=(0.05, 0.05)
+            
+    #     )
 
-    # enhanced_tc = EventTerm(
-    #     func=mdp.enhanced_tc,
-    #     params={'k_p': 0.75,
-    #             'k_d': 0.0,
-    #             'k_i': 1.0,
-    #             'max_speed_correction': +0.25},
-    #     mode="interval",
-    #     interval_range_s=(0.025, 0.025)
-        
-    # )
+    #     enhanced_tc = EventTerm(
+    #         func=mdp.enhanced_tc,
+    #         params={'k_p': 1,
+    #                 'k_d': 0.1,
+    #                 'k_i': 0.0,
+    #                 'max_speed_correction': +0.40,
+    #                 'tc_coefficient': 0.5},
+    #         mode="interval",
+    #         interval_range_s=(0.05, 0.05) 
+    #     )
 
-    # enhanced_rotation = EventTerm(
-    #     func=mdp.enhanced_rotation,
+    #     enhanced_rotation = EventTerm(
+    #         func=mdp.enhanced_rotation,
+    #         params={'k_p': 0.1,
+    #                 'k_d': 0.25,
+    #                 'k_i': 0.3
+    #                 },
+    #         mode="interval",
+    #         interval_range_s=(0.05, 0.05)
+    #     )
+
+    # enhanced_vy = EventTerm(
+    #     func=mdp.enhanced_vy,
     #     params={'k_p': 0.5,
     #             'k_d': 0.5,
     #             'k_i': 0
     #             },
     #     mode="interval",
     #     interval_range_s=(0.025, 0.025)
-        
     # )
 
     # store_data = EventTerm( 
@@ -1358,7 +1294,13 @@ class F1TenthTimeTrialEventsCfg:
     #     },
     # )
 
-
+    # def update_history_buffer(
+    #     env: ManagerBasedEnv,
+    #     env_ids: torch.Tensor,
+    #     # valid_posns_and_rots: dict[str, tuple[float, float]],
+    #     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    # ):
+        
 
 @configclass
 class F1TenthTimeTrialEventsRandomCfg(F1TenthTimeTrialEventsCfg):
@@ -1705,26 +1647,26 @@ def opponent_overtake_positioning_reward(env):
     
     return torch.where(detection_opp_bool & no_off_track & ego_behind_opp_bool, positioning_reward, 0)
 
-def traversable_reward(env):
-    poses =mdp.root_pos_w(env)[..., :2]
-    if not hasattr(env, '_map_levels'):
-        env._map_levels = torch.zeros(env.num_envs, 
-                                dtype=torch.long,
-                                device=env.device)
-    map_levels = env._map_levels
-    traversability = TraversabilityHashmapUtil().get_traversability(poses, map_levels)
-    return torch.where(traversability, 1, 0.)
+# def traversable_reward(env):
+#     poses =mdp.root_pos_w(env)[..., :2]
+#     if not hasattr(env, '_map_levels'):
+#         env._map_levels = torch.zeros(env.num_envs, 
+#                                 dtype=torch.long,
+#                                 device=env.device)
+#     map_levels = env._map_levels
+#     traversability = TraversabilityHashmapUtil().get_traversability(poses, map_levels)
+#     return torch.where(traversability, 1, 0.)
 
-def out_of_track_penalty(env):
-    poses =mdp.root_pos_w(env)[..., :2]
-    if not hasattr(env, '_map_levels'):
-        env._map_levels = torch.zeros(env.num_envs, 
-                                dtype=torch.long,
-                                device=env.device)
-    map_levels = env._map_levels
-    traversability = TraversabilityHashmapUtil().get_traversability(poses, map_levels)
+# def out_of_track_penalty(env):
+#     poses =mdp.root_pos_w(env)[..., :2]
+#     if not hasattr(env, '_map_levels'):
+#         env._map_levels = torch.zeros(env.num_envs, 
+#                                 dtype=torch.long,
+#                                 device=env.device)
+#     map_levels = env._map_levels
+#     traversability = TraversabilityHashmapUtil().get_traversability(poses, map_levels)
 
-    return torch.where(traversability, 0., -1.)
+#     return torch.where(traversability, 0., -1.)
 
 def upright_penalty(env, thresh_deg):
     rot_mat = math_utils.matrix_from_quat(mdp.root_quat_w(env))
@@ -1837,17 +1779,32 @@ def progress_waypoint_bool(env):
     # Reset flags
     env._reset_env_bool = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
     
-
-
+    
+    asset = env.scene["robot"]
+    
+    if not hasattr(env, '_vel_y_calc'):
+        env._vel_y_calc = torch.zeros(env.num_envs, 
+                                        dtype=torch.float32,
+                                        device=env.device)    
+    
+    if not hasattr(env, '_target_velocity_history'):
+        env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
+        env._target_velocity_history = torch.zeros(
+            (env.num_envs, env._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+            )
+    env._vel_y_calc =  mdp.base_lin_vel(env)[:, 1]*mdp.base_lin_vel(env)[:, 0]*1.2
     ###########################
     # Store extras (using first map's waypoints count for simplicity), only necessary when you play policy, find a better way to implement it
     # env.extras['inner'] =  torch.tensor(env.scene.terrain.cfg.inner_list[map_level][current_idx], device=env.device)
     # env.extras['outer'] = torch.tensor(env.scene.terrain.cfg.outer_list[map_level][current_idx], device=env.device)
-    asset = env.scene["robot"]
     env.extras['theta'] = asset.data.heading_w
     env.extras['pos_xy'] = position_xy_world
     env.extras['vel_x'] = asset.data.root_lin_vel_b[:,0]
-    env.extras['vel_y'] = asset.data.root_lin_vel_b[:,1]
+    env.extras['vel_y'] = -asset.data.root_lin_vel_b[:,1]
+    env.extras['target_velocity'] = env._target_velocity_history[:, 0]
+
     env.extras['yaw_rate'] = asset.data.root_ang_vel_b[:,2]
     env.extras['s_idx'] = current_idx.clone()
     env.extras['time'] = torch.tensor(env.sim.current_time, device=env.device)
@@ -1855,6 +1812,9 @@ def progress_waypoint_bool(env):
     env.extras['throttle_joints_applied_effort'] = asset.actuators['throttle_joints'].applied_effort
     ###########################
     
+    env.extras['vel_y_calc'] = env._vel_y_calc
+
+
     return progress_bool, progress
 
 
@@ -1863,6 +1823,47 @@ def negative_throttle_penalty(env):
     last_throttle_action = mdp.last_action(env)[..., 0]
 
     return torch.where(last_throttle_action < 0., -1, 0.) # speed target
+
+def var_throttle_penalty(env):
+    # last_throttle_action = mdp.last_action(env)[..., 0]*env.cfg.actions.throttle_steer.scale[0]
+    last_throttle_action = mdp.last_action(env)[..., 0]
+    if not hasattr(env, '_action_history'):
+        env._action_history_length = CONFIG['env_config']['ACTION_HISTORY_LENGTH']
+        env._action_history = torch.zeros(
+            (env.num_envs, env._action_history_length, 2),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+            )
+    var_throttle = torch.var(env._action_history[:, :, 0], dim=1)
+    
+    return -var_throttle # speed target
+
+def var_steering_penalty(env):
+
+    if not hasattr(env, '_action_history'):
+        env._action_history_length = CONFIG['env_config']['ACTION_HISTORY_LENGTH']
+        env._action_history = torch.zeros(
+            (env.num_envs, env._action_history_length, 2),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+            )
+    var_steering = torch.var(env._action_history[:, :, 1], dim=1)
+    
+    return -var_steering # speed target
+
+def var_throttle_rate_penalty(env):
+
+    if not hasattr(env, '_action_history'):
+        env._action_history_length = CONFIG['env_config']['ACTION_HISTORY_LENGTH']
+        env._action_history = torch.zeros(
+            (env.num_envs, env._action_history_length, 2),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+            )
+    throttle_rate = torch.diff(env._action_history[:, :, 0], dim=1)
+    var_throttle_rate = torch.var(throttle_rate, dim=1)
+
+    return -var_throttle_rate # speed target
 
 def delta_throttle_l2_penalty(env):
     # last_throttle_action = mdp.last_action(env)[..., 0]*env.cfg.actions.throttle_steer.scale[0]
@@ -1875,7 +1876,7 @@ def delta_throttle_l2_penalty(env):
             device=env.device
             )
         
-    delta_throttle_l2 = -((env._action_history[:, 0, 0] - env._action_history[:, 1, 0])/8)**2
+    delta_throttle_l2 = -((env._action_history[:, 0, 0] - env._action_history[:, 1, 0]))**2
     
     return delta_throttle_l2 # speed target
 
@@ -1893,6 +1894,20 @@ def delta_steering_l2_penalty(env):
     delta_steering_l2_penalty = -((env._action_history[:, 0, 1] - env._action_history[:, 1, 1]))**2
     
     return delta_steering_l2_penalty # speed target
+
+def effort_throttle_penalty(env):
+    # last_throttle_action = mdp.last_action(env)[..., 0]*env.cfg.actions.throttle_steer.scale[0]
+
+    effort_throttle_penalty = -(env._action_history[:, 0, 0])**2
+    
+    return effort_throttle_penalty # speed target
+
+def effort_steering_penalty(env):
+    # last_throttle_action = mdp.last_action(env)[..., 0]*env.cfg.actions.throttle_steer.scale[0]
+
+    effort_steering_penalty = -(env._action_history[:, 0, 1])**2
+    
+    return effort_steering_penalty # speed target
 
 # def delta_throttle_l2_penalty(env):
 #     # last_throttle_action = mdp.last_action(env)[..., 0]*env.cfg.actions.throttle_steer.scale[0]
@@ -1953,7 +1968,7 @@ class F1TenthTimeTrialRewardsCfg:
     # Standard reward for progressing along centerline, weight=1
     progress_rew = RewTerm(
         func=progress_rew,
-        weight=1,
+        weight=1.0,
     )
     
     wall_collision_penalty = RewTerm(
@@ -1961,16 +1976,38 @@ class F1TenthTimeTrialRewardsCfg:
         weight=1,
     )
 
+    var_throttle_penalty =  RewTerm(
+        func=var_throttle_penalty,
+        weight=0.03,
+    )
 
-    delta_throttle_l2_penalty =  RewTerm(
-        func=delta_throttle_l2_penalty,
-        weight=0.001,
+    var_throttle_rate_penalty =  RewTerm(
+        func=var_throttle_rate_penalty,
+        weight=0.00,
+    )
+    # delta_throttle_l2_penalty =  RewTerm(
+    #     func=delta_throttle_l2_penalty,
+    #     weight=0.0,
+    # )
+
+    var_steering_penalty =  RewTerm(
+        func=var_steering_penalty,
+        weight=0.5,
+    )
+
+    effort_throttle_penalty =  RewTerm(
+        func=effort_throttle_penalty,
+        weight=0.01,
     )
     
-    delta_steering_l2_penalty =  RewTerm(
-        func=delta_steering_l2_penalty,
-        weight=0.0001,
+    effort_steering_penalty =  RewTerm(
+        func=effort_steering_penalty,
+        weight=0.05,
     )
+    # delta_steering_l2_penalty =  RewTerm(
+    #     func=delta_steering_l2_penalty,
+    #     weight=0.0,
+    # )
     
     # delta_speed_cmd_penalty =  RewTerm(
     #     func=delta_speed_cmd_penalty,
@@ -2010,10 +2047,10 @@ class F1TenthTimeTrialRewardsCfg:
 @configclass
 class TimeTrialCurriculumCfg:
 
-    more_out_of_bounds_penalty = CurrTerm(
+    wall_collision_penalty = CurrTerm(
         func=increase_reward_weight_over_time,
         params={
-            "reward_term_name": "out_of_track",
+            "reward_term_name": "wall_collision_penalty",
             "weight_increase": 0,
             "first_episode_increase": 50,
             "episodes_per_increase": 50,
@@ -2021,27 +2058,60 @@ class TimeTrialCurriculumCfg:
         }
     )
 
-    delta_throttle_l2_penalty = CurrTerm(
+    var_throttle_penalty = CurrTerm(
         func=increase_reward_weight_over_time,
         params={
-            "reward_term_name": "delta_throttle_l2_penalty",
-            "weight_increase": 0.1,
-            "first_episode_increase": 5,
-            "episodes_per_increase": 5,
-            "max_num_increases": 5,
+            "reward_term_name": "var_throttle_penalty",
+            "weight_increase": 0.01,
+            "first_episode_increase": 4,
+            "episodes_per_increase": 4,
+            "max_num_increases": 0,
         }
     )
     
-    delta_steering_l2_penalty = CurrTerm(
+    # delta_throttle_l2_penalty = CurrTerm(
+    #     func=increase_reward_weight_over_time,
+    #     params={
+    #         "reward_term_name": "delta_throttle_l2_penalty",
+    #         "weight_increase": 0.2,
+    #         "first_episode_increase": 3,
+    #         "episodes_per_increase": 3,
+    #         "max_num_increases": 0,
+    #     }
+    # )
+
+    var_steering_penalty = CurrTerm(
         func=increase_reward_weight_over_time,
         params={
-            "reward_term_name": "delta_steering_l2_penalty",
+            "reward_term_name": "var_steering_penalty",
             "weight_increase": 0.01,
-            "first_episode_increase": 10,
-            "episodes_per_increase": 5,
-            "max_num_increases": 5,
+            "first_episode_increase": 4,
+            "episodes_per_increase": 4,
+            "max_num_increases": 0,
         }
     )
+    
+    # effort_steering_penalty = CurrTerm(
+    #     func=increase_reward_weight_over_time,
+    #     params={
+    #         "reward_term_name": "effort_steering_penalty",
+    #         "weight_increase": 0.001,
+    #         "first_episode_increase": 4,
+    #         "episodes_per_increase": 5,
+    #         "max_num_increases": 1,
+    #     }
+    # )
+        
+    # delta_steering_l2_penalty = CurrTerm(
+    #     func=increase_reward_weight_over_time,
+    #     params={
+    #         "reward_term_name": "delta_steering_l2_penalty",
+    #         "weight_increase": 0.2,
+    #         "first_episode_increase": 3,
+    #         "episodes_per_increase": 3,
+    #         "max_num_increases": 0,
+    #     }
+    # )
 
     # delta_speed_cmd_penalty = CurrTerm(
     #     func=increase_reward_weight_over_time,
@@ -2084,33 +2154,33 @@ def upright_bool(env, thresh_deg):
     return upright_penalty(env, thresh_deg) > 0.0
 
 
-def is_not_traversable(env):
-    poses =mdp.root_pos_w(env)[..., :2]
-    if not hasattr(env, '_map_levels'):
-        env._map_levels = torch.zeros(env.num_envs, 
-                                dtype=torch.long,
-                                device=env.device)
-    map_levels     = env._map_levels
-    traversability = TraversabilityHashmapUtil().get_traversability(poses, map_levels)
-    num_episodes   = env.common_step_counter // env.max_episode_length
-#   delay the termination for the first 10 episodes
-    # if num_episodes < 50:
-    #     # return false (IS traversable)
-    #     return torch.zeros(env.num_envs, device=env.device) == 1
+# def is_not_traversable(env):
+#     poses =mdp.root_pos_w(env)[..., :2]
+#     if not hasattr(env, '_map_levels'):
+#         env._map_levels = torch.zeros(env.num_envs, 
+#                                 dtype=torch.long,
+#                                 device=env.device)
+#     map_levels     = env._map_levels
+#     traversability = TraversabilityHashmapUtil().get_traversability(poses, map_levels)
+#     num_episodes   = env.common_step_counter // env.max_episode_length
+# #   delay the termination for the first 10 episodes
+#     # if num_episodes < 50:
+#     #     # return false (IS traversable)
+#     #     return torch.zeros(env.num_envs, device=env.device) == 1
     
-    if not hasattr(env, '_traversability_history'):
-        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
-        env._traversability_history = torch.ones(
-            (env.num_envs, env._rew_history_length), 
-            dtype=torch.long,
-            device=env.device
-        )
+#     if not hasattr(env, '_traversability_history'):
+#         env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
+#         env._traversability_history = torch.ones(
+#             (env.num_envs, env._rew_history_length), 
+#             dtype=torch.long,
+#             device=env.device
+#         )
     
-    env._traversability_history[:, 1:] = env._traversability_history[:, :-1].clone()
-    env._traversability_history[:, 0] = traversability
-    delayed_traversability = env._traversability_history[:,-1]
+#     env._traversability_history[:, 1:] = env._traversability_history[:, :-1].clone()
+#     env._traversability_history[:, 0] = traversability
+#     delayed_traversability = env._traversability_history[:,-1]
 
-    return torch.logical_not(delayed_traversability)
+#     return torch.logical_not(delayed_traversability)
 
 def wall_collision(env):
     pos_xy_world = mdp.root_pos_w(env)[..., :2]
@@ -2339,8 +2409,10 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
         # first create the maps and initialize the lists, 
         # and secondly pass the lists to F1TenthTimeTrialTerrainImporterCfg
 
-        traversability_hashmap_list, waypoints_list, outer_list, inner_list, d_lat_list, psi_rad_list, kappa_radpm_list, vx_mps_list, spacing_meters_list, map_size_pixels_list  = create_maps_from_waypoints(maps_folder_path, MAP_NAME_LIST, ORIGIN_LIST, stage_path, resolution=0.1)
-
+        # traversability_hashmap_list, 
+        waypoints_list, outer_list, inner_list, d_lat_list, psi_rad_list, kappa_radpm_list, vx_mps_list, spacing_meters_list, map_size_pixels_list  = create_maps_from_waypoints(maps_folder_path, MAP_NAME_LIST, ORIGIN_LIST, stage_path, resolution=0.1)
+        traversability_hashmap_list = []
+        
         # Calculate derived values
         row_spacing_list = np.array(spacing_meters_list)[:, 0].tolist()
         col_spacing_list = np.array(spacing_meters_list)[:, 1].tolist()
@@ -2371,7 +2443,7 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
             num_rows_list=num_rows_list,
             width_list=width_list,
             height_list=height_list,
-            origin_list=ORIGIN_LIST,
+            # origin_list=ORIGIN_LIST,
             physics_material=sim_utils.RigidBodyMaterialCfg(
                 friction_combine_mode="multiply",
                 restitution_combine_mode="max",
@@ -2469,7 +2541,25 @@ class F1TenthTimeTrialEnv(ManagerBasedEnv):
         self._last_velocity_adjustment = torch.zeros(self.num_envs, 
                                     dtype=torch.float32,
                                     device=self.device)
+        
+        self._vel_y_calc = torch.zeros(self.num_envs, 
+                                    dtype=torch.float32,
+                                    device=self.device)
 
+        self._target_steering_angle = torch.zeros(self.num_envs, 
+                                    dtype=torch.float32,
+                                    device=self.device)
+
+        self._target_velocity = torch.zeros(self.num_envs, 
+                                    dtype=torch.float32,
+                                    device=self.device)
+
+        self._target_velocity_history = torch.zeros(
+            (self.num_envs, self._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=self.device
+        )
+        
 @configclass
 class F1TenthTimeTrialRLRandomEnvCfg(F1TenthTimeTrialRLEnvCfg):
     events: F1TenthTimeTrialEventsRandomCfg = F1TenthTimeTrialEventsRandomCfg()

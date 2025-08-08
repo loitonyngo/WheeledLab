@@ -60,5 +60,39 @@ class RCCar4WDAction(ackermann_actions.AckermannAction):
 
         # Calculate target rotation for each wheel based on its velocity
         wheel_speeds = torch.stack([v_back_left, v_back_right, v_front_left, v_front_right], dim=1)
+        # self._asset.data.root_lin_vel_b[:, 0] is the actual velocity
+        return delta_left, delta_right, wheel_speeds
+    
 
+class RCCar4WDIncrementalAction(ackermann_actions.AckermannIncrementalAction):
+    """4WD with tan steering and open diff throttle (simulated through ackermann adjusted throttle)"""
+
+    def _calculate_ackermann_angles_and_velocities(self, target_velocity, target_steering_angle):
+
+        L = self.base_length
+        W = self.base_width
+        wheel_radius = self.wheel_rad
+
+        # Calculating the turn radius from the steering angle
+        tan_steering = torch.tan(target_steering_angle)
+        R = torch.where(tan_steering == 0, torch.full_like(tan_steering, 1e6), L / tan_steering)
+
+        # Calculate the steering angles for the left and right front wheels in radians
+        delta_left = tan_steering
+        delta_right = tan_steering
+
+        # Assuming the rear wheels follow the path's radius adjusted for their position
+        R_rear_left = torch.sqrt((R - W/2)**2 + L**2)
+        R_rear_right = torch.sqrt((R + W/2)**2 + L**2)
+
+        # Velocity adjustment based on wheel's distance from the IC
+        v_front_left = target_velocity * torch.abs(R_rear_left / (R*wheel_radius))
+        v_front_right = target_velocity * torch.abs(R_rear_right / (R*wheel_radius))
+
+        v_back_left = target_velocity * torch.abs((R - W/2) / (R*wheel_radius))
+        v_back_right = target_velocity * torch.abs((R + W/2) / (R*wheel_radius))
+
+        # Calculate target rotation for each wheel based on its velocity
+        wheel_speeds = torch.stack([v_back_left, v_back_right, v_front_left, v_front_right], dim=1)
+        # self._asset.data.root_lin_vel_b[:, 0] is the actual velocity
         return delta_left, delta_right, wheel_speeds
