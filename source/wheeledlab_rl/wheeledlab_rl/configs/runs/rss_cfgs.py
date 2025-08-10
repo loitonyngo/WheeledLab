@@ -6,7 +6,7 @@ from wheeledlab_rl.configs import (
     EnvSetup, RslRlRunConfig, RLTrainConfig, AgentSetup, LogConfig
 )
 
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%")
+timestamp = datetime.now().strftime("%Y%m%d_%H%M")
 
 @configclass
 class RSS_TEST(RslRlRunConfig):
@@ -22,13 +22,33 @@ class RSS_TEST(RslRlRunConfig):
         rl_algo_class="ppo",
         log=LogConfig(
             video_interval=50000,
-            run_name = 'run_'+timestamp
+            run_name = timestamp + 'run'
         ),
     )
     agent_setup = AgentSetup(
         entry_point="rsl_rl_cfg_entry_point"
     )
 
+@configclass
+class RSS_TEST_OVERTAKE(RslRlRunConfig):
+    env_setup = EnvSetup(
+        num_envs=64,
+        env_spacing= 15,
+        task_name="Isaac-F1TenthOvertakeRL-v0"
+    )
+    # unique-jazz-683
+    train = RLTrainConfig(
+        num_iterations=5000,
+        rl_algo_lib="rsl",
+        rl_algo_class="ppo",
+        log=LogConfig(
+            video_interval=50000,
+            run_name = timestamp + 'run'
+        ),
+    )
+    agent_setup = AgentSetup(
+        entry_point="rsl_rl_cfg_entry_point"
+    )
 
 # @configclass
 # class RSS_DRIFT_CONFIG(RslRlRunConfig):

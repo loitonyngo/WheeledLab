@@ -1,0 +1,74 @@
+global_limit: 1.0
+n_sectors: 12
+Sector0:
+  start: 0
+  end: 60
+  scaling: 0.7
+  only_FTG: false
+  no_FTG: false
+Sector1:
+  start: 61
+  end: 182
+  scaling: 0.7
+  only_FTG: false
+  no_FTG: false
+Sector2:
+  start: 183
+  end: 292
+  scaling: 0.7
+  only_FTG: false
+  no_FTG: false
+Sector3:
+  start: 293
+  end: 414
+  scaling: 0.7
+  only_FTG: false
+  no_FTG: false
+Sector4:
+  start: 415
+  end: 458
+  scaling: 0.7
+  only_FTG: false
+  no_FTG: false
+Sector5:
+  start: 459
+  end: 507
+  scaling: 0.7
+  only_FTG: false
+  no_FTG: false
+Sector6:
+  start: 508
+  end: 628
+  scaling: 0.7
+  only_FTG: false
+  no_FTG: false
+Sector7:
+  start: 629
+  end: 686
+  scaling: 0.7
+  only_FTG: false
+  no_FTG: false
+Sector8:
+  start: 687
+  end: 751
+  scaling: 0.7
+  only_FTG: false
+  no_FTG: false
+Sector9:
+  start: 752
+  end: 833
+  scaling: 0.7
+  only_FTG: false
+  no_FTG: false
+Sector10:
+  start: 834
+  end: 890
+  scaling: 0.7
+  only_FTG: false
+  no_FTG: false
+Sector11:
+  start: 891
+  end: 940
+  scaling: 0.7
+  only_FTG: false
+  no_FTG: false

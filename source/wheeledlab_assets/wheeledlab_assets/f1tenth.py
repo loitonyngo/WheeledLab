@@ -5,7 +5,7 @@ from isaaclab.assets import ArticulationCfg
 from . import WHEELEDLAB_ASSETS_DATA_DIR
 
 import yaml
-with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/timetrial/config/f1tenth_timetrial_config.yaml", "r") as f:
+with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/config/f1tenth_config.yaml", "r") as f:
     CONFIG = yaml.safe_load(f)
 
 # F1Tenth 4WD actuator configuration.

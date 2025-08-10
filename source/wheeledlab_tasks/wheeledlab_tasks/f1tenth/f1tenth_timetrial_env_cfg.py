@@ -1,0 +1,959 @@
+from collections import Counter
+import os
+import time
+from datetime import datetime
+
+import torch
+import random
+import numpy as np
+from scipy.spatial.transform import Rotation as R
+from dataclasses import MISSING
+
+import isaaclab.envs.mdp as mdp
+import isaaclab.sim as sim_utils
+from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.terrains import TerrainImporterCfg
+from isaaclab.utils import configclass
+import isaaclab.utils.math as math_utils
+from isaaclab.assets import ArticulationCfg, RigidObject, RigidObjectCfg, AssetBaseCfg
+from isaaclab.managers import (
+    EventTermCfg as EventTerm,
+    RewardTermCfg as RewTerm,
+    TerminationTermCfg as DoneTerm,
+    ObservationGroupCfg as ObsGroup,
+    ObservationTermCfg as ObsTerm,
+    CurriculumTermCfg as CurrTerm,
+    CommandTermCfg as CmdTerm,
+    SceneEntityCfg,
+)
+from isaaclab.sensors import TiledCameraCfg
+from isaaclab.utils.noise import UniformNoiseCfg as Unoise
+from isaaclab.utils.math import euler_xyz_from_quat
+from isaaclab.envs import ManagerBasedEnv
+from isaaclab.envs import ManagerBasedRLEnvCfg
+
+from wheeledlab.envs.mdp import increase_reward_weight_over_time
+from wheeledlab_assets import WHEELEDLAB_ASSETS_DATA_DIR
+from wheeledlab_assets.mushr import MUSHR_SUS_CFG
+from wheeledlab_assets.f1tenth import F1TENTH_CFG, OPPONENT_CFG, LB_CFG
+from wheeledlab_tasks.common import Mushr4WDActionCfg
+from wheeledlab_tasks.common import F1Tenth4WDActionCfg, LB4WDActionCfg
+from .disable_lidar import disable_all_lidars
+
+from .utils import create_maps_from_waypoints, generate_random_poses, generate_random_poses_from_list, generate_start_idx_poses_from_list, generate_random_poses_from_waypoints, TraversabilityHashmapUtil, find_frenet_coord_along_waypoints 
+from . import mdp_sensors
+from .mdp import reset_root_state_random, reset_root_state_random_opponent, reset_root_state_start_idx
+
+from .mdp.observations import *
+from .mdp.rewards import *
+from .mdp.terminations import *
+
+import omni.usd
+
+import yaml  # Add this import at the top of your file
+from pathlib import Path
+from typing import List  # For type hints
+
+with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/config/f1tenth_config.yaml", "r") as f:
+    CONFIG = yaml.safe_load(f)
+
+
+##############################
+###### OBSERVATION #######
+##############################
+##########################
+# Variables for observation space. Better way to implement it?
+
+N_HORIZON = CONFIG['env_config']['N_HORIZON'] 
+DELTA_S_IDX = CONFIG['env_config']['DELTA_S_IDX'] 
+
+T_HORIZON = CONFIG['env_config']['T_HORIZON']
+##########################
+
+@configclass
+class F1TenthTimeTrialObsCfg:
+    """Observation specifications for the environment."""
+    @configclass
+    class PolicyCfg(ObsGroup):
+        """
+        [vx, wz, action1(vel), action2(steering), ...]
+        """
+        # lidar = ObsTerm(func=mdp_sensors.lidar_ranges, params={"sensor_cfg":SceneEntityCfg("lidar")})
+        base_lin_vel_x_history = ObsTerm(
+            func=base_lin_vel_x_history, 
+            params={'mean_noise': 0,
+                    'std_noise': 0}            
+            )
+
+        base_lin_vel_y_history = ObsTerm(
+            func=base_lin_vel_y_history, 
+            params={'mean_noise': 0,
+                    'std_noise': 0}            
+            )
+                
+        base_ang_vel_z_history = ObsTerm(
+            func=base_ang_vel_z_history, 
+            params={'mean_noise': 0,
+                    'std_noise': 0}         
+            )
+
+        target_velocity_history = ObsTerm(
+            func=target_velocity_history, 
+            params={'mean_noise': 0,
+                    'std_noise': 0}         
+            )
+             
+        # last_action = ObsTerm(
+        #     func=mdp.last_action,
+        #     clip=(-1., 1.), # TODO: get from ClipAction wrapper
+        #     noise=Unoise(n_min=-.0, n_max=.0, operation='add')
+        # )
+        
+        action_history = ObsTerm(
+            func=action_history,
+        )
+
+        heading_error = ObsTerm(
+            func=heading_error_horizon,
+            params={'delta_s_idx': DELTA_S_IDX,
+                    'n_horizon': N_HORIZON,
+                    't_horizon': T_HORIZON}
+        )
+        deviation_error = ObsTerm(
+            func=deviation_centerline_horizon,
+            params={'delta_s_idx': DELTA_S_IDX,
+                    'n_horizon': N_HORIZON,
+                    't_horizon': T_HORIZON}
+        )
+        d_lat_horizon = ObsTerm(
+            func=d_lat_horizon,
+            params={'delta_s_idx': DELTA_S_IDX,
+                    'n_horizon': N_HORIZON,
+                    't_horizon': T_HORIZON}
+        )
+        #only one env gives problem
+        kappa_radpm_horizon = ObsTerm(
+            func=kappa_radpm_horizon,
+            params={'delta_s_idx': DELTA_S_IDX,
+                    'n_horizon': N_HORIZON,
+                    't_horizon': T_HORIZON}
+        )
+
+        # opponent_frenet_info = ObsTerm(
+        #     func=opponent_frenet_info
+        # )
+        
+        # gap_overtake_info = ObsTerm(
+        #     func=gap_overtake_info
+        # )
+        # delta_psi_rad_horizon = ObsTerm(
+        #     func=delta_psi_rad_horizon,
+        #     params={'delta_s_idx': delta_s_idx,
+        #             'n_horizon': N_STEP_LOOKAHEAD}
+        # )
+
+        def __post_init__(self) -> None:
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
+
+    policy: PolicyCfg = PolicyCfg()
+
+@configclass
+class InitialPoseCfg:
+    pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    rot_euler_xyz_deg: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    lin_vel: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    ang_vel: tuple[float, float, float] = (0.0, 0.0, 0.0)
+
+
+##############################
+###### TERRAIN / TRACK #######
+##############################
+DYNAMIC_FRICTION = CONFIG['env_config']['DYNAMIC_FRICTION']
+STATIC_FRICTION = CONFIG['env_config']['STATIC_FRICTION']
+RESTITUTION = CONFIG['env_config']['RESTITUTION']
+
+@configclass
+class F1TenthTimeTrialTerrainImporterCfg(TerrainImporterCfg):
+    # Declare variables without initialization
+    map_name_list: list = None
+    origin_list: list = None
+
+    traversability_hashmap_list: list = None
+    waypoints_list: list = None
+    outer_list: list = None
+    inner_list: list = None
+    d_lat_list: list = None
+    psi_rad_list: list = None
+    kappa_radpm_list: list = None
+    vx_mps_list: list = None
+    spacing_meters_list: list = None
+    map_size_pixels_list: list = None
+    row_spacing_list: list = None
+    col_spacing_list: list = None
+    num_cols_list: list = None
+    num_rows_list: list = None
+    width_list: list = None
+    height_list: list = None
+
+    # Other configurations that don't depend on runtime values
+    env_spacing = 0
+    prim_path = "/World/ground"
+    terrain_type = "usd"
+    usd_path = None  # Will be set in post_init
+    collision_group = -1
+    physics_material = sim_utils.RigidBodyMaterialCfg(
+        friction_combine_mode="multiply",
+        restitution_combine_mode="max",
+        static_friction=STATIC_FRICTION,
+        dynamic_friction=DYNAMIC_FRICTION,
+        restitution=RESTITUTION
+    )
+    debug_vis = True
+    
+    def generate_random_poses_from_waypoints(self, env : ManagerBasedEnv, env_ids, num_poses, max_radius_offset=0.3):
+        
+        # generate random initial poses with margin
+        env_origins = env.scene.env_origins
+        map_levels = env._map_levels
+        # add which map level
+
+        init_poses, init_current_wps_idx = generate_random_poses_from_waypoints(env_ids, num_poses, map_levels, env_origins, self.waypoints_list, self.inner_list, max_radius_offset=0.3)
+        # init_poses, init_current_wps_idx = generate_random_poses_from_list(env_ids, num_poses, map_levels, env_origins, self.origin_list, self.row_spacing_list, self.col_spacing_list, self.traversability_hashmap_list, self.waypoints_list, self.outer_list, self.inner_list, margin=0.1)
+        max_radius_offset = 0.5
+        valid_init_poses = [
+            InitialPoseCfg(
+                pos=(x + random.uniform(-1,1)*max_radius_offset, y + random.uniform(-1,1)*max_radius_offset, 0.02),
+                rot_euler_xyz_deg=(0., 0., angle)
+            ) for x, y, angle in init_poses
+        ]
+        return valid_init_poses, init_current_wps_idx
+
+    def generate_start_idx_poses(self, env : ManagerBasedEnv, env_ids, num_poses):
+        
+        # generate random initial poses with margin
+        env_origins = env.scene.env_origins
+        map_levels = env._map_levels
+        # add which map level
+
+        init_poses, init_current_wps_idx = generate_start_idx_poses_from_list(env_ids, num_poses, map_levels, env_origins, self.row_spacing_list, self.col_spacing_list, self.traversability_hashmap_list, self.waypoints_list, self.outer_list, self.inner_list, margin=0.1)
+        valid_init_poses = [
+            InitialPoseCfg(
+                pos=(x, y, 0.02),
+                # rot_euler_xyz_deg=(0., 0., angle)
+                rot_euler_xyz_deg=(0., 0., 0)
+            ) for x, y, angle in init_poses
+        ]
+        return valid_init_poses, init_current_wps_idx
+
+@configclass
+class F1TenthTimeTrialSceneCfg(InteractiveSceneCfg):
+    """Configuration for a Mushr car Scene with racetrack terrain and Sensors."""
+
+    terrain = None
+    MAP_NAME_LIST = None
+    ground = AssetBaseCfg(
+        prim_path="/World/base",
+        spawn = sim_utils.GroundPlaneCfg(size=(1000, 1000),
+                                         color=(0,0,0),
+                                         physics_material=sim_utils.RigidBodyMaterialCfg(
+                                            friction_combine_mode="multiply",
+                                            restitution_combine_mode="multiply",
+                                            static_friction=STATIC_FRICTION,
+                                            dynamic_friction=DYNAMIC_FRICTION,
+                                         ),
+        )
+    )
+
+    # Add light configuration
+    light = AssetBaseCfg(
+        prim_path="/World/light",
+        spawn=sim_utils.DistantLightCfg(color=(0.5, 0.5, 0.5), intensity=1500.0),
+    )
+
+    robot: AssetBaseCfg = F1TENTH_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    # opponent: AssetBaseCfg = OPPONENT_CFG.replace(prim_path="{ENV_REGEX_NS}/Opponent")
+
+    
+       # Add cuboid configuration
+    # opponent = RigidObjectCfg(
+    #     prim_path="{ENV_REGEX_NS}/Opponent",
+    #     spawn=sim_utils.CuboidCfg(
+    #         size = (0.6, 0.35, 0.3),
+    #         rigid_props=sim_utils.RigidBodyPropertiesCfg(
+    #             kinematic_enabled= False, 
+    #             rigid_body_enabled=True,
+    #             solver_position_iteration_count=4,
+    #             solver_velocity_iteration_count=1,
+    #             max_angular_velocity=100.0,
+    #             max_linear_velocity=100.0,
+    #             max_depenetration_velocity=0.00001,
+    #             disable_gravity=True,
+    #         ),
+    #         physics_material=sim_utils.RigidBodyMaterialCfg(
+    #             static_friction=0.5,
+    #             dynamic_friction=0.5,
+    #             restitution=0.5,
+    #         ),
+    #     ),
+    #     init_state=RigidObjectCfg.InitialStateCfg(pos=(0.0, 0.0, 0.0)),  # 10cm above ground
+    # )
+
+    ground.init_state.pos = (0.0, 0.0, -1e-4)
+
+    def __post_init__(self):
+        """Post intialization."""
+        super().__post_init__()
+
+        self.robot.init_state = self.robot.init_state.replace(
+            pos=(0.0, 0.0, 0.0)
+        )
+
+        # self.opponent.init_state = self.opponent.init_state.replace(
+        #     pos=(0.0, 0.0, 0.0)
+        # )
+
+#####################
+###### EVENTS #######
+#####################
+def store_data(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+):
+    asset: RigidObject = env.scene[asset_cfg.name]
+    waypoints = torch.tensor(env.scene.terrain.cfg.waypoints_list[0], 
+                        device=env.device)[:, :2]
+    position_xy = mdp.root_pos_w(env)[..., :2]
+
+    # Find nearest waypoint (vectorized)
+    current_idx, _ = find_frenet_coord_along_waypoints(waypoints, position_xy)
+    num_waypoints = len(waypoints)
+
+    #there should be a more elegant way to store these...
+    env.extras['v_x'] = asset.data.root_lin_vel_b[:,0]
+    env.extras['s_idx'] = current_idx.clone()
+    env.extras['time'] = torch.tensor(env.sim.current_time, device=env.device)
+    env.extras['s_idx_max'] = torch.tensor(num_waypoints-1, device=env.device)
+
+
+@configclass
+class F1TenthTimeTrialEventsCfg:
+    
+    # on startup
+    if CONFIG['env_config']['RESET_RANDOM']:
+        reset_root_state_random = EventTerm(
+            func=reset_root_state_random,
+            mode="reset",
+        )
+
+        # reset_root_state_random_opponent = EventTerm(
+        #     func=reset_root_state_random_opponent,
+        #     mode="reset",
+        # )
+    else:
+        reset_root_state_start_idx = EventTerm(
+            func=reset_root_state_start_idx,
+            mode="reset",
+        )
+
+    # if CONFIG['env_config']['VD_ENHANCED']:
+    #     enhanced_braking = EventTerm(
+    #         func=mdp.enhanced_braking,
+    #         params={'k_p': 1,
+    #                 'k_d': 0.2,
+    #                 'min_speed_correction': -0.75},
+    #         mode="interval",
+    #         interval_range_s=(0.05, 0.05)
+            
+    #     )
+
+    #     enhanced_tc = EventTerm(
+    #         func=mdp.enhanced_tc,
+    #         params={'k_p': 1,
+    #                 'k_d': 0.1,
+    #                 'k_i': 0.0,
+    #                 'max_speed_correction': +0.40,
+    #                 'tc_coefficient': 0.5},
+    #         mode="interval",
+    #         interval_range_s=(0.05, 0.05) 
+    #     )
+
+    #     enhanced_rotation = EventTerm(
+    #         func=mdp.enhanced_rotation,
+    #         params={'k_p': 0.1,
+    #                 'k_d': 0.25,
+    #                 'k_i': 0.3
+    #                 },
+    #         mode="interval",
+    #         interval_range_s=(0.05, 0.05)
+    #     )
+
+    # enhanced_vy = EventTerm(
+    #     func=mdp.enhanced_vy,
+    #     params={'k_p': 0.5,
+    #             'k_d': 0.5,
+    #             'k_i': 0
+    #             },
+    #     mode="interval",
+    #     interval_range_s=(0.025, 0.025)
+    # )
+
+    # store_data = EventTerm( 
+    #     func= store_data,
+    #     mode="interval",
+    #     interval_range_s=(0.025, 0.025),
+    #     params={
+    #     },
+    # )
+
+    # def update_history_buffer(
+    #     env: ManagerBasedEnv,
+    #     env_ids: torch.Tensor,
+    #     # valid_posns_and_rots: dict[str, tuple[float, float]],
+    #     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    # ):
+        
+
+@configclass
+class F1TenthTimeTrialEventsRandomCfg(F1TenthTimeTrialEventsCfg):
+    # change_wheel_friction = EventTerm(
+    #     func=mdp.randomize_rigid_body_material,
+    #     mode="startup",
+    #     params={
+    #         "static_friction_range": (0.0, 0.0),
+    #         "dynamic_friction_range": (0.0, 0.0),
+    #         "restitution_range": (0.0, 0.0),
+    #         "num_buckets": 10,
+    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*wheel_.*link"),
+    #         "make_consistent": False,
+    #     },
+    # )
+
+    # add_base_mass = EventTerm(
+    #     func=mdp.randomize_rigid_body_mass,
+    #     mode="startup",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", body_names=["base_link"]),
+    #         "mass_distribution_params": (0.0, 0.0),
+    #         "operation": "abs",
+    #     },
+    # )
+
+    # add_wheel_mass = EventTerm(
+    #     func=mdp.randomize_rigid_body_mass,
+    #     mode="startup",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*wheel_.*link"),
+    #         "mass_distribution_params": (.0, 0.0),
+    #         "operation": "abs",
+    #     },
+    # )
+
+    # Override randomize_gains to target all four wheel motors (front and back)
+    # randomize_gains = EventTerm(
+    #     func=mdp.randomize_actuator_gains,
+    #     mode="startup",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", joint_names=["wheel_(back|front)_.*"]),
+    #         "damping_distribution_params": (0.0, 0.0),
+    #         "operation": "abs",
+    #     },
+    # )
+
+    # change_wheel_friction = EventTerm(
+    #     func=mdp.randomize_rigid_body_material,
+    #     mode="startup",
+    #     params={
+    #         "static_friction_range": (STATIC_FRICTION-0.1, STATIC_FRICTION+0.1),
+    #         "dynamic_friction_range": (DYNAMIC_FRICTION-0.1, DYNAMIC_FRICTION+0.1),
+    #         "restitution_range": (0.0, 0.0),
+    #         "num_buckets": 20,
+    #         "asset_cfg": SceneEntityCfg("robot", body_names="wheel.*"),
+    #         "make_consistent": True,
+    #     },
+    # )
+
+    kill_lidar = EventTerm(
+        func=disable_all_lidars,
+        mode="startup",
+        params={}          
+    )
+
+
+######################
+###### REWARDS #######
+######################
+
+####### F1TenthTimeTrial Environment #######
+@configclass
+class F1TenthTimeTrialRewardsCfg:
+    # """Reward terms for the MDP."""
+    # Set "weight" to 0 to deactivate a reward term
+
+    # Penalty if the car goes off-track (it would be crashing on the walls), weight=1
+    # out_of_track = RewTerm(
+    #     func=out_of_track_penalty,
+    #     weight=1,
+    # )
+
+    # Standard reward for progressing along centerline, weight=1
+    progress_rew = RewTerm(
+        func=progress_rew,
+        weight=1.0,
+    )
+    
+    wall_collision_penalty = RewTerm(
+        func=wall_collision_penalty,
+        weight=1,
+    )
+
+    var_throttle_penalty =  RewTerm(
+        func=var_throttle_penalty,
+        weight=0.03,
+    )
+
+    var_throttle_rate_penalty =  RewTerm(
+        func=var_throttle_rate_penalty,
+        weight=0.00,
+    )
+    # delta_throttle_l2_penalty =  RewTerm(
+    #     func=delta_throttle_l2_penalty,
+    #     weight=0.0,
+    # )
+
+    var_steering_penalty =  RewTerm(
+        func=var_steering_penalty,
+        weight=0.5,
+    )
+
+    effort_throttle_penalty =  RewTerm(
+        func=effort_throttle_penalty,
+        weight=0.01,
+    )
+    
+    effort_steering_penalty =  RewTerm(
+        func=effort_steering_penalty,
+        weight=0.05,
+    )
+    # delta_steering_l2_penalty =  RewTerm(
+    #     func=delta_steering_l2_penalty,
+    #     weight=0.0,
+    # )
+    
+    # delta_speed_cmd_penalty =  RewTerm(
+    #     func=delta_speed_cmd_penalty,
+    #     weight=0.000,
+    # )
+    
+    # opponent_overtake_closing_reward = RewTerm(
+    #     func=opponent_overtake_closing_reward,
+    #     weight=1,
+    # )
+
+    # opponent_overtake_positioning_reward = RewTerm(
+    #     func=opponent_overtake_positioning_reward,
+    #     weight=0.01,
+    # )
+    
+    # opponent_collision_penalty = RewTerm(
+    #     func=opponent_collision_penalty,
+    #     weight=20,
+    # )
+
+
+    if CONFIG['env_config']['CONSTANT_SPEED']:
+        # # # Reward terms to test various frictions, simple task (constant velocity and steering, drive in circle)
+        speed_target_rew = RewTerm(
+            func=speed_target_rew,
+            params={
+                "speed_target": CONFIG['env_config']['CONSTANT_SPEED_TARGET']
+            },
+            weight= 1.,
+        )
+
+########################
+###### CURRICULUM ######
+########################
+
+@configclass
+class TimeTrialCurriculumCfg:
+
+    wall_collision_penalty = CurrTerm(
+        func=increase_reward_weight_over_time,
+        params={
+            "reward_term_name": "wall_collision_penalty",
+            "weight_increase": 0,
+            "first_episode_increase": 50,
+            "episodes_per_increase": 50,
+            "max_num_increases": 0,
+        }
+    )
+
+    var_throttle_penalty = CurrTerm(
+        func=increase_reward_weight_over_time,
+        params={
+            "reward_term_name": "var_throttle_penalty",
+            "weight_increase": 0.01,
+            "first_episode_increase": 4,
+            "episodes_per_increase": 4,
+            "max_num_increases": 0,
+        }
+    )
+    
+    # delta_throttle_l2_penalty = CurrTerm(
+    #     func=increase_reward_weight_over_time,
+    #     params={
+    #         "reward_term_name": "delta_throttle_l2_penalty",
+    #         "weight_increase": 0.2,
+    #         "first_episode_increase": 3,
+    #         "episodes_per_increase": 3,
+    #         "max_num_increases": 0,
+    #     }
+    # )
+
+    var_steering_penalty = CurrTerm(
+        func=increase_reward_weight_over_time,
+        params={
+            "reward_term_name": "var_steering_penalty",
+            "weight_increase": 0.01,
+            "first_episode_increase": 4,
+            "episodes_per_increase": 4,
+            "max_num_increases": 0,
+        }
+    )
+    
+    # effort_steering_penalty = CurrTerm(
+    #     func=increase_reward_weight_over_time,
+    #     params={
+    #         "reward_term_name": "effort_steering_penalty",
+    #         "weight_increase": 0.001,
+    #         "first_episode_increase": 4,
+    #         "episodes_per_increase": 5,
+    #         "max_num_increases": 1,
+    #     }
+    # )
+        
+    # delta_steering_l2_penalty = CurrTerm(
+    #     func=increase_reward_weight_over_time,
+    #     params={
+    #         "reward_term_name": "delta_steering_l2_penalty",
+    #         "weight_increase": 0.2,
+    #         "first_episode_increase": 3,
+    #         "episodes_per_increase": 3,
+    #         "max_num_increases": 0,
+    #     }
+    # )
+
+    # delta_speed_cmd_penalty = CurrTerm(
+    #     func=increase_reward_weight_over_time,
+    #     params={
+    #         "reward_term_name": "delta_speed_cmd_penalty",
+    #         "weight_increase": 0.01,
+    #         "first_episode_increase": 16,
+    #         "episodes_per_increase": 4,
+    #         "max_num_increases": 10,
+    #     }
+    # )
+    
+    # less_traversability = CurrTerm(
+    #     func=increase_reward_weight_over_time,
+    #     params={
+    #         "reward_term_name": "traversablility",
+    #         "increase": -0.25,
+    #         "first_episode_increase": 25,
+    #         "episodes_per_increase": 25,
+    #         "max_num_increases": 2,
+    #     }
+    # )
+
+##########################
+###### TERMINATION #######
+##########################
+
+@configclass
+class F1TenthTimeTrialTerminationsCfg:
+    # Time Out terms, i.e. conditions to terminate episode
+    
+    # Max episode time reached
+    time_out = DoneTerm(
+        func=mdp.time_out, 
+        time_out=True)
+
+    # Car rolls over
+    # rollover = DoneTerm(
+    #     func=upright_bool,
+    #     params={"thresh_deg": 90.},
+    # )
+
+    # Car goes out of track
+    if CONFIG['env_config']['NON_TRAVERSABLE_TERMINATION']:
+        # non_traversable = DoneTerm(
+        #     func=is_not_traversable
+        # )
+
+        wall_collision = DoneTerm(
+            func=wall_collision
+        )
+
+        # opponent_collision = DoneTerm(
+        #     func=opponent_collision
+        # )
+
+    # out_range = DoneTerm(
+    #     func=out_of_map,
+    # )
+
+
+@configclass
+class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
+
+    # These will be overwritten by the rss_cfgs
+    seed: int = 42
+    num_envs: int = 1
+    env_spacing: int = 0
+
+    ######################
+    # MAP_NAME_LIST, to be manually changed here (it would be nice to pass it via hydra cfg)
+    # THE INITIALIZATION TIME EXPONENTIALLY INCREASE WITH THE 
+    MAP_NAME_LIST: List[str] = CONFIG['env_config']['MAP_NAME_LIST']
+
+    ######################
+
+    # Reset config
+    events: F1TenthTimeTrialEventsCfg = F1TenthTimeTrialEventsCfg()
+
+    # actions: Mushr4WDActionCfg = Mushr4WDActionCfg()
+    actions: F1Tenth4WDActionCfg = F1Tenth4WDActionCfg()
+    # actions: LB4WDActionCfg = LB4WDActionCfg()
+
+    # MDP settings
+    observations: F1TenthTimeTrialObsCfg = F1TenthTimeTrialObsCfg()
+    rewards: F1TenthTimeTrialRewardsCfg = F1TenthTimeTrialRewardsCfg()
+    terminations: F1TenthTimeTrialTerminationsCfg = F1TenthTimeTrialTerminationsCfg()
+    curriculum: TimeTrialCurriculumCfg = TimeTrialCurriculumCfg()
+
+
+    def __post_init__(self):
+        """Post initialization."""
+        super().__post_init__()
+        print('[INFO]: F1TenthTimeTrialRLEnvCfg class post init START')
+
+        # viewer settings
+        self.viewer.eye = [0., 0.0, 35.0] 
+        self.viewer.lookat = [0.0, 0.0, -3.]
+        self.sim.dt = CONFIG['env_config']['SIM_DT']
+        self.decimation = CONFIG['env_config']['SIM_DECIMATION']
+        # self.sim.dt = 0.025/2
+        # self.decimation = 2
+        # self.sim.render_interval = self.decimation
+        self.sim.render_interval = self.decimation
+
+        # Terminations config
+        self.episode_length_s = CONFIG['env_config']['EPISODE_LENGTH_S']
+        self.actions.throttle_steer.scale = (CONFIG['env_config']['MAX_SPEED_SCALING'], CONFIG['env_config']['MAX_STEERING_SCALING'])
+        self.actions.throttle_steer.offset = (CONFIG['env_config']['SPEED_OFFSET'], CONFIG['env_config']['STEERING_OFFSET'])
+
+
+        # Terrain variables
+        MAP_NAME_LIST = self.MAP_NAME_LIST
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # Folder where you save the usd files, name can be optimized, now it is possible it creates the same files with different names
+        stage_path = os.path.join(WHEELEDLAB_ASSETS_DATA_DIR, 'maps', timestamp + '_test.usd')
+        ORIGIN_LIST = CONFIG['env_config']['ORIGIN_LIST']
+
+        
+        # Folder where you have the maps (race stack format)
+        maps_folder_path = '/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/utils/maps'    
+
+        ############################
+        # IT IS IMPORTANT THE ORDER; 
+        # first create the maps and initialize the lists, 
+        # and secondly pass the lists to F1TenthTimeTrialTerrainImporterCfg
+
+        # traversability_hashmap_list, 
+        waypoints_list, outer_list, inner_list, d_lat_list, psi_rad_list, kappa_radpm_list, vx_mps_list, spacing_meters_list, map_size_pixels_list  = create_maps_from_waypoints(maps_folder_path, MAP_NAME_LIST, ORIGIN_LIST, stage_path, resolution=0.1)
+        traversability_hashmap_list = []
+        
+        # Calculate derived values
+        row_spacing_list = np.array(spacing_meters_list)[:, 0].tolist()
+        col_spacing_list = np.array(spacing_meters_list)[:, 1].tolist()
+        num_cols_list = np.array(map_size_pixels_list)[:, 0].tolist()
+        num_rows_list = np.array(map_size_pixels_list)[:, 1].tolist()
+        width_list = (np.array(num_rows_list) * np.array(row_spacing_list)).tolist()
+        height_list = (np.array(num_cols_list) * np.array(col_spacing_list)).tolist()
+
+        # Create terrain config
+        self.terrain = F1TenthTimeTrialTerrainImporterCfg(
+            prim_path="/World/envs/env_.*",
+            env_spacing=self.env_spacing,
+            usd_path=stage_path,
+            map_name_list=MAP_NAME_LIST,
+            traversability_hashmap_list=traversability_hashmap_list,
+            waypoints_list=waypoints_list,
+            outer_list=outer_list,
+            inner_list=inner_list,
+            d_lat_list=d_lat_list,
+            psi_rad_list=psi_rad_list,
+            kappa_radpm_list=kappa_radpm_list,
+            vx_mps_list=vx_mps_list,
+            spacing_meters_list=spacing_meters_list,
+            map_size_pixels_list=map_size_pixels_list,
+            row_spacing_list=row_spacing_list,
+            col_spacing_list=col_spacing_list,
+            num_cols_list=num_cols_list,
+            num_rows_list=num_rows_list,
+            width_list=width_list,
+            height_list=height_list,
+            # origin_list=ORIGIN_LIST,
+            physics_material=sim_utils.RigidBodyMaterialCfg(
+                friction_combine_mode="multiply",
+                restitution_combine_mode="max",
+                static_friction=STATIC_FRICTION,
+                dynamic_friction=DYNAMIC_FRICTION,
+                restitution=RESTITUTION
+            ),
+            debug_vis=True,
+        )
+        ############################
+
+        self.scene = F1TenthTimeTrialSceneCfg(
+            num_envs=self.num_envs, env_spacing=self.env_spacing, terrain = self.terrain
+        )
+
+        # Set the environment class
+        self.env_class = F1TenthTimeTrialEnv
+        print('[INFO]: F1TenthTimeTrialRLEnvCfg class post init END')
+
+
+class F1TenthTimeTrialEnv(ManagerBasedEnv):
+    def __init__(self, cfg: F1TenthTimeTrialRLEnvCfg, **kwargs):
+        # Initialize parent class first
+        super().__init__(cfg, **kwargs)
+        
+        # Initialize buffers needed in observations, rewards, etc
+
+        # Save the initial waypoint idx (as soon as the car respawns)
+        self._initial_waypoint_indices = torch.zeros(self.num_envs, 
+                                                dtype=torch.long,
+                                                device=self.device)
+
+        self._prev_delta_s_opp_ego = torch.zeros(self.num_envs,
+                                                   dtype=torch.float32,
+                                                   device=self.device)
+        
+        # Save history of last #history_length waypoints idx
+        self._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']
+        self._progress_history_checkpoint_idx = CONFIG['env_config']['PROGRESS_HISTORY_CHECKPOINT_IDX']
+
+        self._progress_history_indices = torch.zeros(
+            (self.num_envs, self._progress_history_length),  # Shape: (num_envs, history_length)
+            dtype=torch.long,
+            device=self.device
+        )
+
+        self._action_history_length = CONFIG['env_config']['ACTION_HISTORY_LENGTH']
+        self._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
+        self._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
+
+        self._action_history = torch.zeros(
+            (self.num_envs, self._action_history_length, 2),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=self.device
+        )
+
+        self._base_lin_vel_x_history = torch.zeros(
+            (self.num_envs, self._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=self.device
+        )
+        self._base_lin_vel_y_history = torch.zeros(
+            (self.num_envs, self._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=self.device
+        )
+        self._base_ang_vel_z_history = torch.zeros(
+            (self.num_envs, self._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=self.device
+        )
+
+        self._traversability_history = torch.ones(
+            (self.num_envs, self._rew_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.long,
+            device=self.device
+        )
+
+        # Bool to determine if the car has just reset; it is set to True when a new pose is generated, and afterwards immediately set to false 
+        self._reset_env_bool = torch.zeros(  # Tracks where to insert the next index
+            self.num_envs,
+            dtype=torch.bool,
+            device=self.device
+        )
+
+        # Save how many waypoints idx the car has progressed
+        self._current_progress = torch.zeros(self.num_envs,
+                                           device=self.device)
+
+        # Defines at which map the car is assigned to (see list order)
+        self._map_levels = torch.zeros(self.num_envs, 
+                                    dtype=torch.long,
+                                    device=self.device)
+
+        self._last_velocity_adjustment = torch.zeros(self.num_envs, 
+                                    dtype=torch.float32,
+                                    device=self.device)
+        
+        self._vel_y_calc = torch.zeros(self.num_envs, 
+                                    dtype=torch.float32,
+                                    device=self.device)
+
+        self._target_steering_angle = torch.zeros(self.num_envs, 
+                                    dtype=torch.float32,
+                                    device=self.device)
+
+        self._target_velocity = torch.zeros(self.num_envs, 
+                                    dtype=torch.float32,
+                                    device=self.device)
+
+        self._target_velocity_history = torch.zeros(
+            (self.num_envs, self._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=self.device
+        )
+        
+@configclass
+class F1TenthTimeTrialRLRandomEnvCfg(F1TenthTimeTrialRLEnvCfg):
+    events: F1TenthTimeTrialEventsRandomCfg = F1TenthTimeTrialEventsRandomCfg()
+
+######################
+###### PLAY ENV ######
+######################
+
+@configclass
+class F1TenthTimeTrialPlayEnvCfg(F1TenthTimeTrialRLEnvCfg):
+    """no terminations"""
+  
+    # on startup
+    if CONFIG['env_config']['RESET_RANDOM']:
+        events: F1TenthTimeTrialEventsCfg = F1TenthTimeTrialEventsRandomCfg(
+            reset_root_state_random = EventTerm(
+                func=reset_root_state_random,
+                mode="reset",
+            )
+        )
+    else:
+        events: F1TenthTimeTrialEventsCfg = F1TenthTimeTrialEventsRandomCfg(
+            reset_root_state_start_idx = EventTerm(
+                func=reset_root_state_start_idx,
+                mode="reset",
+            )
+        )
+
+    rewards: F1TenthTimeTrialRewardsCfg = None
+    terminations: F1TenthTimeTrialTerminationsCfg = None
+
+    def __post_init__(self):
+        super().__post_init__()

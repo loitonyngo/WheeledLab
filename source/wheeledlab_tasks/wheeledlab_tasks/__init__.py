@@ -7,11 +7,13 @@ import gymnasium as gym
 # from .drifting import MushrDriftRLEnvCfg, MushrDriftPlayEnvCfg
 # from .visual import MushrVisualRLEnvCfg, MushrVisualPlayEnvCfg
 # from .elevation import MushrElevationRLEnvCfg, MushrElevationPlayEnvCfg
-from .timetrial import F1TenthTimeTrialRLEnvCfg, F1TenthTimeTrialPlayEnvCfg
+# from .timetrial import F1TenthTimeTrialRLEnvCfg, F1TenthTimeTrialPlayEnvCfg
+from .f1tenth import F1TenthTimeTrialRLEnvCfg, F1TenthTimeTrialPlayEnvCfg, F1TenthOvertakeRLEnvCfg, F1TenthOvertakePlayEnvCfg
+
 # import wheeledlab_tasks.drifting.config.agents.mushr as mushr_drift_agents
 # import wheeledlab_tasks.visual.config.agents.mushr as mushr_visual_agents
 # import wheeledlab_tasks.elevation.config.agents.mushr as mushr_elevation_agents
-import wheeledlab_tasks.timetrial.config.agents.f1tenth as f1tenth_timetrial_agents
+import wheeledlab_tasks.f1tenth.config.agents.f1tenth as f1tenth_agents
 
 gym.register(
     id="Isaac-F1TenthTimeTrialRL-v0",
@@ -19,13 +21,22 @@ gym.register(
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point":F1TenthTimeTrialRLEnvCfg,
-        "rsl_rl_cfg_entry_point": f"{f1tenth_timetrial_agents.__name__}.rsl_rl_ppo_cfg:F1TenthPPORunnerCfg",
+        "rsl_rl_cfg_entry_point": f"{f1tenth_agents.__name__}.rsl_rl_ppo_cfg:F1TenthPPORunnerCfg",
         "play_env_cfg_entry_point": F1TenthTimeTrialPlayEnvCfg
     }
 )
 
 
-
+gym.register(
+    id="Isaac-F1TenthOvertakeRL-v0",
+    entry_point='isaaclab.envs:ManagerBasedRLEnv',
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point":F1TenthOvertakeRLEnvCfg,
+        "rsl_rl_cfg_entry_point": f"{f1tenth_agents.__name__}.rsl_rl_ppo_cfg:F1TenthPPORunnerCfg",
+        "play_env_cfg_entry_point": F1TenthOvertakePlayEnvCfg
+    }
+)
 
 
 

@@ -1,1 +1,0 @@
-from .f1tenth_timetrial_env_cfg import F1TenthTimeTrialRLEnvCfg, F1TenthTimeTrialPlayEnvCfg
