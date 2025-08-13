@@ -40,9 +40,9 @@ from wheeledlab_tasks.common import Mushr4WDActionCfg
 from wheeledlab_tasks.common import F1Tenth4WDActionCfg, LB4WDActionCfg
 from .disable_lidar import disable_all_lidars
 
-from .utils import create_maps_from_waypoints, generate_random_poses, generate_random_poses_from_list, generate_start_idx_poses_from_list, generate_random_poses_from_waypoints, TraversabilityHashmapUtil, find_frenet_coord_along_waypoints 
+from .utils import create_maps_from_waypoints, generate_start_idx_poses_from_list, generate_random_poses_from_waypoints, find_frenet_coord_along_waypoints 
 from . import mdp_sensors
-from .mdp import reset_root_state_random, reset_root_state_random_opponent, reset_root_state_start_idx
+from .mdp import reset_root_state_random, reset_root_state_start_idx
 
 from .mdp.observations import *
 from .mdp.rewards import *
@@ -509,6 +509,11 @@ class F1TenthTimeTrialRewardsCfg:
         weight=1,
     )
 
+    opponent_collision_penalty = RewTerm(
+        func=opponent_collision_penalty,
+        weight=1,
+    )
+   
     var_throttle_penalty =  RewTerm(
         func=var_throttle_penalty,
         weight=0.03,
@@ -557,10 +562,7 @@ class F1TenthTimeTrialRewardsCfg:
     #     weight=0.01,
     # )
     
-    # opponent_collision_penalty = RewTerm(
-    #     func=opponent_collision_penalty,
-    #     weight=20,
-    # )
+ 
 
 
     if CONFIG['env_config']['CONSTANT_SPEED']:
@@ -774,7 +776,7 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
         # and secondly pass the lists to F1TenthTimeTrialTerrainImporterCfg
 
         # traversability_hashmap_list, 
-        waypoints_list, outer_list, inner_list, d_lat_list, psi_rad_list, kappa_radpm_list, vx_mps_list, spacing_meters_list, map_size_pixels_list  = create_maps_from_waypoints(maps_folder_path, MAP_NAME_LIST, ORIGIN_LIST, stage_path, resolution=0.1)
+        waypoints_list, outer_list, inner_list, d_lat_list, psi_rad_list, kappa_radpm_list, vx_mps_list, opp_traj_center_list, opp_traj_iqp_list, opp_traj_sp_list, spacing_meters_list, map_size_pixels_list  = create_maps_from_waypoints(maps_folder_path, MAP_NAME_LIST, ORIGIN_LIST, stage_path, resolution=0.1)
         traversability_hashmap_list = []
         
         # Calculate derived values

@@ -78,30 +78,30 @@ def wall_collision_penalty(env):
 
 
 def opponent_collision_penalty(env):
-    num_episodes = env.common_step_counter // env.max_episode_length
-    if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_EP']:
-        return torch.zeros(env.num_envs, device=env.device, dtype=torch.long)
+    # num_episodes = env.common_step_counter // env.max_episode_length
+    # if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_UNTIL_EP']:
+    #     return torch.zeros(env.num_envs, device=env.device, dtype=torch.long)
     
     ego_position_xy = env.scene["robot"].data.root_pos_w[:, :2]
     opp_position_xy = env.scene["opponent"].data.root_pos_w[:, :2]
     dist = torch.norm(ego_position_xy - opp_position_xy, p=2, dim=1)
     opp_collision = dist < CONFIG['env_config']['OPP_COLLISION_RADIUS']
 
-    return torch.where(opp_collision.bool(), -1*forward_vel(env)**2, 0)
+    return torch.where(opp_collision.bool(), -1, 0)
     # return torch.where(opp_collision.bool(), -1, 0)
 
-def opponent_overtake_closing_reward(env):
+def opponent_overtake_delta_distance_reward(env):
     num_episodes = env.common_step_counter // env.max_episode_length
-    if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_EP']:
+    if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_UNTIL_EP']:
         return torch.zeros(env.num_envs, device=env.device, dtype=torch.long)
     
     if not hasattr(env, '_prev_delta_s_opp_ego'):
         env._prev_delta_s_opp_ego = torch.ones(env.num_envs, 
                                 dtype=torch.float32,
-                                device=env.device)*CONFIG['env_config']['OPPONENT_DETECTION_IDX']
+                                device=env.device)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']*CONFIG['env_config']['LEN_S_IDX']  
         
-    ego_position_xy = env.scene["robot"].data.root_pos_w[:, :2]
-    opp_position_xy = env.scene["opponent"].data.root_pos_w[:, :2]
+    ego_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("robot"))[..., :2]
+    opp_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("opponent"))[:, :2]
     dist = torch.norm(ego_position_xy - opp_position_xy, p=2, dim=1)
 
     if not hasattr(env, '_map_levels'):
@@ -130,9 +130,7 @@ def opponent_overtake_closing_reward(env):
     delta_s_opp_ego       = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
     delta_delta_s_opp_ego = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
 
-    ego_behind_opp_bool  = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
-    detection_opp_bool = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
-    far_way_opp_bool   = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    # ego_behind_opp_bool  = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
     # current_indices = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
     
     # Process each map level separately
@@ -161,17 +159,10 @@ def opponent_overtake_closing_reward(env):
         )
 
         delta_s_opp_ego[env_mask] = ((opp_current_idx-ego_current_idx + num_waypoints//2) % num_waypoints - num_waypoints // 2).float()
-        delta_delta_s_opp_ego[env_mask] = env._prev_delta_s_opp_ego[env_mask] - delta_s_opp_ego[env_mask]
-        
-        detection_opp_bool[env_mask] = abs(delta_s_opp_ego[env_mask]) < CONFIG['env_config']['OPPONENT_DETECTION_IDX']
-        ego_behind_opp_bool[env_mask] = delta_s_opp_ego[env_mask] > 0
-        far_way_opp_bool[env_mask]   = abs(delta_s_opp_ego[env_mask]) > CONFIG['env_config']['OPPONENT_FAR_AWAY_IDX']
-        env._prev_delta_s_opp_ego[env_mask] = delta_s_opp_ego[env_mask]
+        delta_delta_s_opp_ego[env_mask] = env._prev_delta_s_opp_ego[env_mask] - delta_s_opp_ego[env_mask]*CONFIG['env_config']['LEN_S_IDX']  
 
-    far_way_opp_bool_mask = far_way_opp_bool == 1
-    env._prev_delta_s_opp_ego[far_way_opp_bool_mask] = torch.ones(far_way_opp_bool_mask.sum().item(),
-                                dtype=torch.float32,
-                                device=env.device)*CONFIG['env_config']['OPPONENT_DETECTION_IDX']
+        # ego_behind_opp_bool[env_mask] = delta_s_opp_ego[env_mask] > 0
+        env._prev_delta_s_opp_ego[env_mask] = delta_s_opp_ego[env_mask]*CONFIG['env_config']['LEN_S_IDX']  
 
     if not hasattr(env, '_traversability_history'):
         env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
@@ -182,23 +173,110 @@ def opponent_overtake_closing_reward(env):
         )
     no_off_track = env._traversability_history.min(dim=1).values == 1
 
-    return torch.where(detection_opp_bool & no_off_track & ego_behind_opp_bool, delta_delta_s_opp_ego*CONFIG['env_config']['LEN_S_IDX'], 0)
+    # New: Give reward for both closing gap AND extending lead
+    reward = torch.where(
+        delta_s_opp_ego < 0,  # If ego is ahead
+        -delta_delta_s_opp_ego,  # Positive reward for increasing lead (since delta_s_opp_ego becomes more negative)
+        delta_delta_s_opp_ego  # Original reward for closing gap
+    )
+    
+    return torch.where(no_off_track, reward*CONFIG['env_config']['LEN_S_IDX'], 0)
+
+def opponent_overtake_distance_reward(env):
+    num_episodes = env.common_step_counter // env.max_episode_length
+    if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_UNTIL_EP']:
+        return torch.zeros(env.num_envs, device=env.device, dtype=torch.long)
+
+    ego_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("robot"))[..., :2]
+    opp_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("opponent"))[:, :2]
+    dist = torch.norm(ego_position_xy - opp_position_xy, p=2, dim=1)
+
+    if not hasattr(env, '_map_levels'):
+        env._map_levels = torch.zeros(env.num_envs, 
+                                dtype=torch.long,
+                                device=env.device)
+        
+    if not hasattr(env, '_progress_history_indices'):
+        env._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']  # Store last 10 waypoints
+
+        env._progress_history_indices = torch.zeros(
+            (env.num_envs, env._progress_history_length), 
+            dtype=torch.long,
+            device=env.device
+        )
+        env._reset_env_bool = torch.ones(  # Tracks where to insert the next index
+            env.num_envs,
+            dtype=torch.bool,
+            device=env.device
+        )
+    if not hasattr(env, '_progress_history_checkpoint_idx'):
+        env._progress_history_checkpoint_idx = CONFIG['env_config']['PROGRESS_HISTORY_CHECKPOINT_IDX']
+    map_levels = env._map_levels  # shape: [num_envs]
+    unique_map_levels = torch.unique(map_levels)
+    
+    # Initialize outputs
+    delta_s_opp_ego       = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
+
+    # ego_behind_opp_bool  = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    # current_indices = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+    
+    # Process each map level separately
+    for map_level in unique_map_levels:
+        env_mask = (map_levels == map_level)
+        num_envs_in_map = env_mask.sum()
+        
+        if num_envs_in_map == 0:
+            continue
+            
+        # Get waypoints for this map level
+        waypoints_world = torch.tensor(
+            env.scene.terrain.cfg.waypoints_list[map_level], 
+            device=env.device
+        )[:, :2]
+        num_waypoints = len(waypoints_world)
+
+        # Find nearest waypoint for these environments
+        ego_current_idx, _ = find_frenet_coord_along_waypoints(
+            waypoints_world, 
+            ego_position_xy[env_mask]
+        )
+        opp_current_idx, _ = find_frenet_coord_along_waypoints(
+            waypoints_world, 
+            opp_position_xy[env_mask]
+        )
+
+        delta_s_opp_ego[env_mask] = ((opp_current_idx-ego_current_idx + num_waypoints//2) % num_waypoints - num_waypoints // 2).float()
+
+        # ego_behind_opp_bool[env_mask] = delta_s_opp_ego[env_mask] > 0
+        env._prev_delta_s_opp_ego[env_mask] = delta_s_opp_ego[env_mask]*CONFIG['env_config']['LEN_S_IDX']  
+
+    if not hasattr(env, '_traversability_history'):
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
+        env._traversability_history = torch.ones(
+            (env.num_envs, env._rew_history_length), 
+            dtype=torch.long,
+            device=env.device
+        )
+    no_off_track = env._traversability_history.min(dim=1).values == 1
+    
+    return torch.where(no_off_track, -delta_s_opp_ego*CONFIG['env_config']['LEN_S_IDX'], 0)
 
 def opponent_overtake_positioning_reward(env):
-    num_episodes = env.common_step_counter // env.max_episode_length
-    if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_EP']:
+    num_episodes = env.common_step_counter // env.max_episode_length  
+    if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_UNTIL_EP']:
         return torch.zeros(env.num_envs, device=env.device, dtype=torch.long)
     
     if not hasattr(env, '_prev_delta_s_opp_ego'):
         env._prev_delta_s_opp_ego = torch.ones(env.num_envs, 
                                 dtype=torch.float32,
-                                device=env.device)*CONFIG['env_config']['OPPONENT_DETECTION_IDX']
+                                device=env.device)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']*CONFIG['env_config']['LEN_S_IDX']  
         
-    ego_position_xy = env.scene["robot"].data.root_pos_w[:, :2]
+    ego_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("robot"))[..., :2]
+    opp_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("opponent"))[:, :2]
+    
     ego_heading_w = env.scene["robot"].data.heading_w
     ego_heading_vec = torch.stack([torch.cos(ego_heading_w), torch.sin(ego_heading_w)], dim=1)
 
-    opp_position_xy = env.scene["opponent"].data.root_pos_w[:, :2]
     dist = torch.norm(ego_position_xy - opp_position_xy, p=2, dim=1)
 
     ego_opp_vec = (opp_position_xy - ego_position_xy)
@@ -234,7 +312,6 @@ def opponent_overtake_positioning_reward(env):
     delta_d_opp_ego = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
 
     ego_behind_opp_bool  = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
-    detection_opp_bool = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
     far_way_opp_bool   = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
     # current_indices = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
     
@@ -266,15 +343,9 @@ def opponent_overtake_positioning_reward(env):
         delta_s_opp_ego[env_mask] = ((opp_current_idx-ego_current_idx + num_waypoints//2) % num_waypoints - num_waypoints // 2).float()
         delta_d_opp_ego[env_mask] = abs(ego_current_d-opp_current_d).float()
         
-        detection_opp_bool[env_mask]  = abs(delta_s_opp_ego[env_mask]) < CONFIG['env_config']['OPPONENT_DETECTION_IDX']
         ego_behind_opp_bool[env_mask] = delta_s_opp_ego[env_mask] > 0
         far_way_opp_bool[env_mask]    = abs(delta_s_opp_ego[env_mask]) > CONFIG['env_config']['OPPONENT_FAR_AWAY_IDX']
-        env._prev_delta_s_opp_ego[env_mask] = delta_s_opp_ego[env_mask]
-
-    far_way_opp_bool_mask = far_way_opp_bool == 1
-    env._prev_delta_s_opp_ego[far_way_opp_bool_mask] = torch.ones(far_way_opp_bool_mask.sum().item(),
-                                dtype=torch.float32,
-                                device=env.device)*CONFIG['env_config']['OPPONENT_DETECTION_IDX']
+        env._prev_delta_s_opp_ego[env_mask] = delta_s_opp_ego[env_mask]*CONFIG['env_config']['LEN_S_IDX']  
 
     if not hasattr(env, '_traversability_history'):
         env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
@@ -287,7 +358,7 @@ def opponent_overtake_positioning_reward(env):
 
     positioning_reward = torch.abs(ego_opp_positioning_vec_norm)*torch.exp(-delta_s_opp_ego*0.05)
     
-    return torch.where(detection_opp_bool & no_off_track & ego_behind_opp_bool, positioning_reward, 0)
+    return torch.where(no_off_track & ego_behind_opp_bool, positioning_reward, 0)
 
 # def traversable_reward(env):
 #     poses =mdp.root_pos_w(env)[..., :2]
@@ -347,7 +418,7 @@ def progress_rew(env):
         )
     no_off_track = env._traversability_history.min(dim=1).values == 1
 
-    return torch.where(progress_bool & no_off_track, progress*0.1, 0.0)
+    return torch.where(progress_bool & no_off_track, progress*CONFIG['env_config']['LEN_S_IDX'], 0.0)
 
 def progress_waypoint_bool(env):
     # Initialize buffer if first run

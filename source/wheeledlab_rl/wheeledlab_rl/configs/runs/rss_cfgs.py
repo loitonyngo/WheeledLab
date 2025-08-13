@@ -12,7 +12,7 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M")
 class RSS_TEST(RslRlRunConfig):
     env_setup = EnvSetup(
         num_envs=64,
-        env_spacing= 15,
+        env_spacing= 30,
         task_name="Isaac-F1TenthTimeTrialRL-v0"
     )
     # unique-jazz-683
@@ -33,7 +33,7 @@ class RSS_TEST(RslRlRunConfig):
 class RSS_TEST_OVERTAKE(RslRlRunConfig):
     env_setup = EnvSetup(
         num_envs=64,
-        env_spacing= 15,
+        env_spacing= 30,
         task_name="Isaac-F1TenthOvertakeRL-v0"
     )
     # unique-jazz-683

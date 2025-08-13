@@ -1,6 +1,6 @@
 # config.yaml
 env_config:
-  MAP_NAME_LIST: ['THETRACK']
+  MAP_NAME_LIST: ['square']
   ORIGIN_LIST: [[0, 0], [0, 0], [0, 0], [28, 28]]
 
   # When comparing real data that don't use incremental it must always be set to False
@@ -30,7 +30,7 @@ env_config:
   # SIM_DT: Physics simulation time step
   # SIM_DECIMATION: Number of physics steps per simulation step; 
   # The actions, observations, and rewards are computed every SIM_DECIMATION steps, and every SIM_DECIMATION*SIM_DT seconds.
-  EPISODE_LENGTH_S: 15
+  EPISODE_LENGTH_S: 20
   SIM_DT: 0.00625
   SIM_DECIMATION: 8
   # SIM_DT: 0.025
@@ -53,32 +53,19 @@ env_config:
   OBS_HISTORY_LENGTH: 10
   REW_HISTORY_LENGTH: 10
 
-  WALL_COLLISION_RADIUS: 0.26
+  WALL_COLLISION_RADIUS: 0.28
   
   MAX_PROGRESS_IDX: 30 
 
   # True if lookahed changes with current velocity
-  DYNAMIC_LOOKAHEAD: False
-  T_HORIZON: 5
+  DYNAMIC_LOOKAHEAD: True
+  T_HORIZON: 4
   # Otherwise use constant idx steps (s_horizon = delta_s_idx [0.1m/idx] * N_horizon_idx [idx])
   DELTA_S_IDX: 10
   N_HORIZON: 20
 
-  
-
-
-
-
-
-
-
-
-
-
-
-
-
   OPP_COLLISION_RADIUS: 0.4
-  OPPONENT_DETECTION_IDX: 60
-  OPPONENT_FAR_AWAY_IDX: 100
-  IGNORE_OPPONENT_EP: 10
+  OPPONENT_INIT_DISTANCE_IDX: 60
+  OPPONENT_FAR_AWAY_IDX: 80
+  IGNORE_OPPONENT_UNTIL_EP: 0
+  STATIC_OPPONENT_UNTIL_EP: 0

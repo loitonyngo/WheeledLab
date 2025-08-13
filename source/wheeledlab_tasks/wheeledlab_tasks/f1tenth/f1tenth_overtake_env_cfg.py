@@ -40,13 +40,15 @@ from wheeledlab_tasks.common import Mushr4WDActionCfg
 from wheeledlab_tasks.common import F1Tenth4WDActionCfg, LB4WDActionCfg
 from .disable_lidar import disable_all_lidars
 
-from .utils import create_maps_from_waypoints, generate_random_poses, generate_random_poses_from_list, generate_start_idx_poses_from_list, generate_random_poses_from_waypoints, TraversabilityHashmapUtil, find_frenet_coord_along_waypoints 
+from .utils import create_maps_from_waypoints, generate_random_poses_from_waypoints_with_opponent, find_frenet_coord_along_waypoints 
 from . import mdp_sensors
-from .mdp import reset_root_state_random, reset_root_state_random_opponent, reset_root_state_start_idx
+from .mdp import reset_root_state_random_with_opponent, reset_root_state_start_idx
 
 from .mdp.observations import *
 from .mdp.rewards import *
 from .mdp.terminations import *
+from .mdp.events import move_opponent
+
 
 import omni.usd
 
@@ -102,12 +104,6 @@ class F1TenthOvertakeObsCfg:
             params={'mean_noise': 0,
                     'std_noise': 0}         
             )
-             
-        # last_action = ObsTerm(
-        #     func=mdp.last_action,
-        #     clip=(-1., 1.), # TODO: get from ClipAction wrapper
-        #     noise=Unoise(n_min=-.0, n_max=.0, operation='add')
-        # )
         
         action_history = ObsTerm(
             func=action_history,
@@ -139,13 +135,14 @@ class F1TenthOvertakeObsCfg:
                     't_horizon': T_HORIZON}
         )
 
-        # opponent_frenet_info = ObsTerm(
-        #     func=opponent_frenet_info
-        # )
+        opponent_frenet_info = ObsTerm(
+            func=opponent_frenet_info
+        )
         
-        # gap_overtake_info = ObsTerm(
-        #     func=gap_overtake_info
-        # )
+        gaps_info = ObsTerm(
+            func=gaps_info
+        ) 
+        
         # delta_psi_rad_horizon = ObsTerm(
         #     func=delta_psi_rad_horizon,
         #     params={'delta_s_idx': delta_s_idx,
@@ -197,6 +194,10 @@ class F1TenthOvertakeTerrainImporterCfg(TerrainImporterCfg):
     width_list: list = None
     height_list: list = None
 
+    opp_traj_center_list= None
+    opp_traj_iqp_list= None
+    opp_traj_sp_list= None
+    
     # Other configurations that don't depend on runtime values
     env_spacing = 0
     prim_path = "/World/ground"
@@ -212,14 +213,14 @@ class F1TenthOvertakeTerrainImporterCfg(TerrainImporterCfg):
     )
     debug_vis = True
     
-    def generate_random_poses_from_waypoints(self, env : ManagerBasedEnv, env_ids, num_poses, max_radius_offset=0.3):
+    def generate_random_poses_from_waypoints_with_opponent(self, env : ManagerBasedEnv, env_ids, num_poses, max_radius_offset=0.3):
         
         # generate random initial poses with margin
         env_origins = env.scene.env_origins
         map_levels = env._map_levels
         # add which map level
 
-        init_poses, init_current_wps_idx = generate_random_poses_from_waypoints(env_ids, num_poses, map_levels, env_origins, self.waypoints_list, self.inner_list, max_radius_offset=0.3)
+        init_poses, init_current_wps_idx, opp_init_poses, opp_init_current_wps_idx = generate_random_poses_from_waypoints_with_opponent(env_ids, num_poses, map_levels, env_origins, self.waypoints_list, self.inner_list, max_radius_offset=0.3)
         # init_poses, init_current_wps_idx = generate_random_poses_from_list(env_ids, num_poses, map_levels, env_origins, self.origin_list, self.row_spacing_list, self.col_spacing_list, self.traversability_hashmap_list, self.waypoints_list, self.outer_list, self.inner_list, margin=0.1)
         max_radius_offset = 0.5
         valid_init_poses = [
@@ -228,24 +229,32 @@ class F1TenthOvertakeTerrainImporterCfg(TerrainImporterCfg):
                 rot_euler_xyz_deg=(0., 0., angle)
             ) for x, y, angle in init_poses
         ]
-        return valid_init_poses, init_current_wps_idx
-
-    def generate_start_idx_poses(self, env : ManagerBasedEnv, env_ids, num_poses):
         
-        # generate random initial poses with margin
-        env_origins = env.scene.env_origins
-        map_levels = env._map_levels
-        # add which map level
-
-        init_poses, init_current_wps_idx = generate_start_idx_poses_from_list(env_ids, num_poses, map_levels, env_origins, self.row_spacing_list, self.col_spacing_list, self.traversability_hashmap_list, self.waypoints_list, self.outer_list, self.inner_list, margin=0.1)
-        valid_init_poses = [
+        opp_valid_init_poses = [
             InitialPoseCfg(
-                pos=(x, y, 0.02),
-                # rot_euler_xyz_deg=(0., 0., angle)
-                rot_euler_xyz_deg=(0., 0., 0)
-            ) for x, y, angle in init_poses
+                pos=(x + random.uniform(-1,1)*max_radius_offset, y + random.uniform(-1,1)*max_radius_offset, 0.02),
+                rot_euler_xyz_deg=(0., 0., angle)
+            ) for x, y, angle in opp_init_poses
         ]
-        return valid_init_poses, init_current_wps_idx
+                
+        return valid_init_poses, init_current_wps_idx, opp_valid_init_poses, opp_init_current_wps_idx
+
+    # def generate_start_idx_poses(self, env : ManagerBasedEnv, env_ids, num_poses):
+        
+    #     # generate random initial poses with margin
+    #     env_origins = env.scene.env_origins
+    #     map_levels = env._map_levels
+    #     # add which map level
+
+    #     init_poses, init_current_wps_idx = generate_start_idx_poses_from_list(env_ids, num_poses, map_levels, env_origins, self.row_spacing_list, self.col_spacing_list, self.traversability_hashmap_list, self.waypoints_list, self.outer_list, self.inner_list, margin=0.1)
+    #     valid_init_poses = [
+    #         InitialPoseCfg(
+    #             pos=(x, y, 0.02),
+    #             # rot_euler_xyz_deg=(0., 0., angle)
+    #             rot_euler_xyz_deg=(0., 0., 0)
+    #         ) for x, y, angle in init_poses
+    #     ]
+    #     return valid_init_poses, init_current_wps_idx
 
 @configclass
 class F1TenthOvertakeSceneCfg(InteractiveSceneCfg):
@@ -255,7 +264,7 @@ class F1TenthOvertakeSceneCfg(InteractiveSceneCfg):
     MAP_NAME_LIST = None
     ground = AssetBaseCfg(
         prim_path="/World/base",
-        spawn = sim_utils.GroundPlaneCfg(size=(1000, 1000),
+        spawn = sim_utils.GroundPlaneCfg(size=(500, 500),
                                          color=(0,0,0),
                                          physics_material=sim_utils.RigidBodyMaterialCfg(
                                             friction_combine_mode="multiply",
@@ -279,8 +288,9 @@ class F1TenthOvertakeSceneCfg(InteractiveSceneCfg):
        # Add cuboid configuration
     opponent = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Opponent",
-        spawn=sim_utils.CuboidCfg(
-            size = (0.6, 0.35, 0.3),
+        spawn=sim_utils.CylinderCfg(
+            radius=0.2,
+            height=0.1,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 kinematic_enabled= False, 
                 rigid_body_enabled=True,
@@ -310,9 +320,9 @@ class F1TenthOvertakeSceneCfg(InteractiveSceneCfg):
             pos=(0.0, 0.0, 0.0)
         )
 
-        # self.opponent.init_state = self.opponent.init_state.replace(
-        #     pos=(0.0, 0.0, 0.0)
-        # )
+        self.opponent.init_state = self.opponent.init_state.replace(
+            pos=(0.0, 0.0, 0.0)
+        )
 
 #####################
 ###### EVENTS #######
@@ -344,14 +354,14 @@ class F1TenthOvertakeEventsCfg:
     # on startup
     if CONFIG['env_config']['RESET_RANDOM']:
         reset_root_state_random = EventTerm(
-            func=reset_root_state_random,
+            func=reset_root_state_random_with_opponent,
             mode="reset",
         )
 
-        reset_root_state_random_opponent = EventTerm(
-            func=reset_root_state_random_opponent,
-            mode="reset",
-        )
+        # reset_root_state_random_opponent = EventTerm(
+        #     func=reset_root_state_random_opponent,
+        #     mode="reset",
+        # )
         
     else:
         reset_root_state_start_idx = EventTerm(
@@ -359,6 +369,13 @@ class F1TenthOvertakeEventsCfg:
             mode="reset",
         )
 
+    move_opponent = EventTerm(
+        func=move_opponent,
+        mode="interval",
+        interval_range_s=(0.05, 0.05)
+    )
+    
+    
     # if CONFIG['env_config']['VD_ENHANCED']:
     #     enhanced_braking = EventTerm(
     #         func=mdp.enhanced_braking,
@@ -493,22 +510,38 @@ class F1TenthOvertakeRewardsCfg:
     # """Reward terms for the MDP."""
     # Set "weight" to 0 to deactivate a reward term
 
-    # Penalty if the car goes off-track (it would be crashing on the walls), weight=1
-    # out_of_track = RewTerm(
-    #     func=out_of_track_penalty,
-    #     weight=1,
-    # )
-
     # Standard reward for progressing along centerline, weight=1
     progress_rew = RewTerm(
         func=progress_rew,
-        weight=1.0,
+        weight=1,
     )
     
     wall_collision_penalty = RewTerm(
         func=wall_collision_penalty,
         weight=1,
     )
+
+    opponent_collision_penalty = RewTerm(
+        func=opponent_collision_penalty,
+        weight=10,
+    )
+
+
+    opponent_overtake_distance_reward = RewTerm(
+        func=opponent_overtake_distance_reward,
+        weight=0.1,
+    )
+
+    opponent_overtake_delta_distance_reward = RewTerm(
+        func=opponent_overtake_delta_distance_reward,
+        weight=0.1,
+    )
+
+    # opponent_overtake_positioning_reward = RewTerm(
+    #     func=opponent_overtake_positioning_reward,
+    #     weight=0.1,
+    # )
+
 
     var_throttle_penalty =  RewTerm(
         func=var_throttle_penalty,
@@ -519,14 +552,10 @@ class F1TenthOvertakeRewardsCfg:
         func=var_throttle_rate_penalty,
         weight=0.00,
     )
-    # delta_throttle_l2_penalty =  RewTerm(
-    #     func=delta_throttle_l2_penalty,
-    #     weight=0.0,
-    # )
-
+    
     var_steering_penalty =  RewTerm(
         func=var_steering_penalty,
-        weight=0.5,
+        weight=0.1,
     )
 
     effort_throttle_penalty =  RewTerm(
@@ -538,30 +567,6 @@ class F1TenthOvertakeRewardsCfg:
         func=effort_steering_penalty,
         weight=0.05,
     )
-    # delta_steering_l2_penalty =  RewTerm(
-    #     func=delta_steering_l2_penalty,
-    #     weight=0.0,
-    # )
-    
-    # delta_speed_cmd_penalty =  RewTerm(
-    #     func=delta_speed_cmd_penalty,
-    #     weight=0.000,
-    # )
-    
-    # opponent_overtake_closing_reward = RewTerm(
-    #     func=opponent_overtake_closing_reward,
-    #     weight=1,
-    # )
-
-    # opponent_overtake_positioning_reward = RewTerm(
-    #     func=opponent_overtake_positioning_reward,
-    #     weight=0.01,
-    # )
-    
-    # opponent_collision_penalty = RewTerm(
-    #     func=opponent_collision_penalty,
-    #     weight=20,
-    # )
 
 
     if CONFIG['env_config']['CONSTANT_SPEED']:
@@ -592,6 +597,39 @@ class OvertakeCurriculumCfg:
         }
     )
 
+    opponent_collision_penalty = CurrTerm(
+        func=increase_reward_weight_over_time,
+        params={
+            "reward_term_name": "opponent_collision_penalty",
+            "weight_increase": 1,
+            "first_episode_increase": 50,
+            "episodes_per_increase": 50,
+            "max_num_increases": 0,
+        }
+    )
+
+    opponent_overtake_closing_reward = CurrTerm(
+        func=increase_reward_weight_over_time,
+        params={
+            "reward_term_name": "opponent_overtake_closing_reward",
+            "weight_increase": 0.5,
+            "first_episode_increase": 50,
+            "episodes_per_increase": 50,
+            "max_num_increases": 0,
+        }
+    )
+
+    # opponent_overtake_positioning_reward = CurrTerm(
+    #     func=increase_reward_weight_over_time,
+    #     params={
+    #         "reward_term_name": "opponent_overtake_positioning_reward",
+    #         "weight_increase": 0.5,
+    #         "first_episode_increase": 50,
+    #         "episodes_per_increase": 50,
+    #         "max_num_increases": 3,
+    #     }
+    # )
+    
     var_throttle_penalty = CurrTerm(
         func=increase_reward_weight_over_time,
         params={
@@ -602,17 +640,6 @@ class OvertakeCurriculumCfg:
             "max_num_increases": 0,
         }
     )
-    
-    # delta_throttle_l2_penalty = CurrTerm(
-    #     func=increase_reward_weight_over_time,
-    #     params={
-    #         "reward_term_name": "delta_throttle_l2_penalty",
-    #         "weight_increase": 0.2,
-    #         "first_episode_increase": 3,
-    #         "episodes_per_increase": 3,
-    #         "max_num_increases": 0,
-    #     }
-    # )
 
     var_steering_penalty = CurrTerm(
         func=increase_reward_weight_over_time,
@@ -624,50 +651,7 @@ class OvertakeCurriculumCfg:
             "max_num_increases": 0,
         }
     )
-    
-    # effort_steering_penalty = CurrTerm(
-    #     func=increase_reward_weight_over_time,
-    #     params={
-    #         "reward_term_name": "effort_steering_penalty",
-    #         "weight_increase": 0.001,
-    #         "first_episode_increase": 4,
-    #         "episodes_per_increase": 5,
-    #         "max_num_increases": 1,
-    #     }
-    # )
-        
-    # delta_steering_l2_penalty = CurrTerm(
-    #     func=increase_reward_weight_over_time,
-    #     params={
-    #         "reward_term_name": "delta_steering_l2_penalty",
-    #         "weight_increase": 0.2,
-    #         "first_episode_increase": 3,
-    #         "episodes_per_increase": 3,
-    #         "max_num_increases": 0,
-    #     }
-    # )
 
-    # delta_speed_cmd_penalty = CurrTerm(
-    #     func=increase_reward_weight_over_time,
-    #     params={
-    #         "reward_term_name": "delta_speed_cmd_penalty",
-    #         "weight_increase": 0.01,
-    #         "first_episode_increase": 16,
-    #         "episodes_per_increase": 4,
-    #         "max_num_increases": 10,
-    #     }
-    # )
-    
-    # less_traversability = CurrTerm(
-    #     func=increase_reward_weight_over_time,
-    #     params={
-    #         "reward_term_name": "traversablility",
-    #         "increase": -0.25,
-    #         "first_episode_increase": 25,
-    #         "episodes_per_increase": 25,
-    #         "max_num_increases": 2,
-    #     }
-    # )
 
 ##########################
 ###### TERMINATION #######
@@ -682,6 +666,18 @@ class F1TenthOvertakeTerminationsCfg:
         func=mdp.time_out, 
         time_out=True)
 
+    opponent_overtaken = DoneTerm(
+            func=opponent_overtaken,
+    )
+    
+    # far_from_opponent = DoneTerm(
+    #     func=far_from_opponent,
+    # )
+    
+    opponent_collision = DoneTerm(
+            func=opponent_collision
+    )
+    
     # Car rolls over
     # rollover = DoneTerm(
     #     func=upright_bool,
@@ -698,9 +694,7 @@ class F1TenthOvertakeTerminationsCfg:
             func=wall_collision
         )
 
-        # opponent_collision = DoneTerm(
-        #     func=opponent_collision
-        # )
+
 
     # out_range = DoneTerm(
     #     func=out_of_map,
@@ -773,7 +767,7 @@ class F1TenthOvertakeRLEnvCfg(ManagerBasedRLEnvCfg):
         # and secondly pass the lists to F1TenthOvertakeTerrainImporterCfg
 
         # traversability_hashmap_list, 
-        waypoints_list, outer_list, inner_list, d_lat_list, psi_rad_list, kappa_radpm_list, vx_mps_list, spacing_meters_list, map_size_pixels_list  = create_maps_from_waypoints(maps_folder_path, MAP_NAME_LIST, ORIGIN_LIST, stage_path, resolution=0.1)
+        waypoints_list, outer_list, inner_list, d_lat_list, psi_rad_list, kappa_radpm_list, vx_mps_list, opp_traj_center_list, opp_traj_iqp_list, opp_traj_sp_list, spacing_meters_list, map_size_pixels_list  = create_maps_from_waypoints(maps_folder_path, MAP_NAME_LIST, ORIGIN_LIST, stage_path, resolution=0.1)
         traversability_hashmap_list = []
         
         # Calculate derived values
@@ -814,6 +808,9 @@ class F1TenthOvertakeRLEnvCfg(ManagerBasedRLEnvCfg):
                 dynamic_friction=DYNAMIC_FRICTION,
                 restitution=RESTITUTION
             ),
+            opp_traj_center_list=opp_traj_center_list,
+            opp_traj_iqp_list=opp_traj_iqp_list,
+            opp_traj_sp_list=opp_traj_sp_list,
             debug_vis=True,
         )
         ############################
@@ -922,6 +919,18 @@ class F1TenthOvertakeEnv(ManagerBasedEnv):
             dtype=torch.float32,
             device=self.device
         )
+
+        self._opponent_type = torch.zeros(
+            self.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.long,
+            device=self.device
+        )
+        
+        self._opponent_vel_scaling = torch.ones(
+            self.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float16,
+            device=self.device
+        )
         
 @configclass
 class F1TenthOvertakeRLRandomEnvCfg(F1TenthOvertakeRLEnvCfg):
@@ -939,7 +948,7 @@ class F1TenthOvertakePlayEnvCfg(F1TenthOvertakeRLEnvCfg):
     if CONFIG['env_config']['RESET_RANDOM']:
         events: F1TenthOvertakeEventsCfg = F1TenthOvertakeEventsRandomCfg(
             reset_root_state_random = EventTerm(
-                func=reset_root_state_random,
+                func=reset_root_state_random_with_opponent,
                 mode="reset",
             )
         )

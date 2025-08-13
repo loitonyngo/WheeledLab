@@ -8,7 +8,9 @@ from .maps_utils import *
 
 import time
 import random 
-
+with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/config/f1tenth_config.yaml", "r") as f:
+    CONFIG = yaml.safe_load(f)
+    
 def create_maps_from_waypoints(maps_folder_path, map_name_list, origin_list, stage_path, resolution):
     """
     Create a USD file and traversability hashmap from a PNG + YAML pair.
@@ -31,7 +33,7 @@ def create_maps_from_waypoints(maps_folder_path, map_name_list, origin_list, sta
         waypoints_path = os.path.join(map_path, 'global_waypoints.json')
         
         # Load and process waypoints data
-        waypoints, trackbounds, d_lat, psi_rad, kappa_radpm, vx_mps = load_waypoints(waypoints_path)
+        waypoints, trackbounds, d_lat, psi_rad, kappa_radpm, vx_mps, opp_traj_center, opp_traj_iqp, opp_traj_sp = load_waypoints(waypoints_path)
         outer, inner = separate_and_align_bounds(waypoints, trackbounds)
         outer, inner = match_by_projection(waypoints, outer, inner)
         
@@ -44,7 +46,10 @@ def create_maps_from_waypoints(maps_folder_path, map_name_list, origin_list, sta
             'kappa_radpm': kappa_radpm,
             'vx_mps': vx_mps,
             'outer': outer,
-            'inner': inner
+            'inner': inner,
+            'opp_traj_center': opp_traj_center,       
+            'opp_traj_iqp': opp_traj_iqp,
+            'opp_traj_sp' : opp_traj_sp
         })
         
         # Update min size
@@ -64,6 +69,10 @@ def create_maps_from_waypoints(maps_folder_path, map_name_list, origin_list, sta
     spacing_meters_list = []
     map_size_pixels_list = []
 
+    opp_traj_center_list = []
+    opp_traj_iqp_list = []
+    opp_traj_sp_list = []
+    
     for i, (map_name, data) in enumerate(zip(map_name_list, map_data)):
         # Create drivable map
         hashmap, map_size_meters, map_size_pixels, (x_min, x_max), (y_min, y_max), res = create_square_drivable_map_v2(
@@ -79,15 +88,20 @@ def create_maps_from_waypoints(maps_folder_path, map_name_list, origin_list, sta
         # Convert points to USD coordinates
         waypoints_usd = set_points_usd(
             data['waypoints'], map_name, 'waypoints', origin_list[i], 
-            map_size_meters, stage, [(1.0, 0.0, 0.0)], x_min, y_min
+            stage, [(1.0, 0.0, 0.0)]
         )
         outer_usd = set_points_usd(
             data['outer'], map_name, 'outer', origin_list[i], 
-            map_size_meters, stage, [(0.0, 0.0, 1.0)], x_min, y_min
+            stage, [(0.0, 0.0, 1.0)]
         )
         inner_usd = set_points_usd(
             data['inner'], map_name, 'inner', origin_list[i], 
-            map_size_meters, stage, [(0.0, 0.0, 1.0)], x_min, y_min
+            stage, [(0.0, 0.0, 1.0)]
+        )
+
+        opp_traj_usd = set_points_usd(
+            data['opp_traj_iqp'][:,0:2], map_name, 'opp_traj', origin_list[i], 
+            stage, [(1.0, 1.0, 0.0)]
         )
         
         # Store results (convert to lists at the end)
@@ -99,6 +113,10 @@ def create_maps_from_waypoints(maps_folder_path, map_name_list, origin_list, sta
         psi_rad_list.append(data['psi_rad'].tolist())
         kappa_radpm_list.append(data['kappa_radpm'].tolist())
         vx_mps_list.append(data['vx_mps'].tolist())
+        opp_traj_center_list.append(data['opp_traj_center'].tolist())
+        opp_traj_iqp_list.append(data['opp_traj_iqp'].tolist())
+        opp_traj_sp_list.append(data['opp_traj_sp'].tolist())
+
         spacing_meters_list.append([res, res])
         map_size_pixels_list.append(map_size_pixels)
         
@@ -119,6 +137,9 @@ def create_maps_from_waypoints(maps_folder_path, map_name_list, origin_list, sta
         psi_rad_list,
         kappa_radpm_list,
         vx_mps_list,
+        opp_traj_center_list,
+        opp_traj_iqp_list,
+        opp_traj_sp_list,
         spacing_meters_list,
         map_size_pixels_list
     )
@@ -391,6 +412,100 @@ def generate_random_poses_from_waypoints(env_ids, num_poses, map_levels, env_ori
     poses = list(zip(all_xs_shifted.tolist(), all_ys_shifted.tolist(), all_angles.tolist()))
     
     return poses, current_wps_idx
+
+def generate_random_poses_from_waypoints_with_opponent(env_ids, num_poses, map_levels, env_origins, waypoints_usd_list, inner_usd_list, max_radius_offset=1):
+    """
+    Generate random poses by selecting from waypoints, supporting multiple maps based on map_level.
+    Only generates poses for environments specified in env_ids.
+    """
+    # Convert inputs to numpy/torch as needed
+    env_ids_np = env_ids.cpu().numpy() if torch.is_tensor(env_ids) else np.array(env_ids)
+    map_levels_np = map_levels.cpu().numpy() if torch.is_tensor(map_levels) else np.array(map_levels)
+    
+    # Get map levels only for the requested environments
+    requested_map_levels = map_levels_np[env_ids_np]
+    
+    # Initialize output containers
+    all_xs_shifted = np.zeros(len(env_ids))
+    all_ys_shifted = np.zeros(len(env_ids))
+    current_wps_idx = np.zeros(len(env_ids))
+    all_angles = np.zeros(len(env_ids))
+    
+    all_opp_xs_shifted = np.zeros(len(env_ids))
+    all_opp_ys_shifted = np.zeros(len(env_ids))
+    opp_current_wps_idx = np.zeros(len(env_ids))
+    all_opp_angles = np.zeros(len(env_ids))
+    
+    # Process each unique map_level separately among the requested environments
+    unique_map_levels = np.unique(requested_map_levels)
+    
+    for map_level in unique_map_levels:
+        # Get indices (within env_ids) of environments with this map_level
+        env_mask = (requested_map_levels == map_level)
+        current_env_ids = env_ids_np[env_mask]
+        
+        # Skip if no environments use this map_level (shouldn't happen due to unique)
+        if len(current_env_ids) == 0:
+            continue
+            
+        # Get the waypoints for this map_level
+        waypoints_xy = torch.tensor(waypoints_usd_list[map_level])[:, :2].to(torch.float32)
+        inner_xy = torch.tensor(inner_usd_list[map_level])[:, :2].to(torch.float32)
+        num_waypoints = len(waypoints_xy)
+        
+        # Randomly select waypoints for each environment
+        selected_indices = np.random.choice(num_waypoints, size=len(current_env_ids), replace=True)
+        opponent_selected_indices = (selected_indices + CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']) % num_waypoints
+        
+        # Get the positions of the selected waypoints
+        selected_waypoints = waypoints_xy[selected_indices]
+        xs = selected_waypoints[:, 0].numpy()
+        ys = selected_waypoints[:, 1].numpy()
+        
+        # Compute angles (looking at next waypoint)
+        lookahead = 5
+        next_indices = (selected_indices + lookahead) % num_waypoints
+        next_waypoints = waypoints_xy[next_indices]
+        
+        deltas = next_waypoints - selected_waypoints
+        angles = torch.rad2deg(torch.atan2(deltas[:, 1], deltas[:, 0])) + np.random.uniform(-15, 15, size=len(current_env_ids))
+        
+        # Shift the coordinates according to env_origins for the reset
+        xs_shifted = xs + env_origins[current_env_ids, 0].cpu().numpy() 
+        ys_shifted = ys + env_origins[current_env_ids, 1].cpu().numpy() 
+        
+        # Store results in the output arrays at the correct positions
+        all_xs_shifted[env_mask] = xs_shifted
+        all_ys_shifted[env_mask] = ys_shifted
+        all_angles[env_mask] = angles.numpy() if torch.is_tensor(angles) else angles
+        current_wps_idx[env_mask] = selected_indices
+
+        # Get opponent positions and angles
+        opponent_waypoints = waypoints_xy[opponent_selected_indices]
+        opp_xs = opponent_waypoints[:, 0].numpy()
+        opp_ys = opponent_waypoints[:, 1].numpy()
+        
+        # Compute opponent angles (same lookahead logic)
+        opp_next_indices = (opponent_selected_indices + lookahead) % num_waypoints
+        opp_next_waypoints = waypoints_xy[opp_next_indices]
+        opp_deltas = opp_next_waypoints - opponent_waypoints
+        opp_angles = torch.rad2deg(torch.atan2(opp_deltas[:, 1], opp_deltas[:, 0])) 
+        
+        # Shift opponent coordinates according to env_origins
+        opp_xs_shifted = opp_xs + env_origins[current_env_ids, 0].cpu().numpy()
+        opp_ys_shifted = opp_ys + env_origins[current_env_ids, 1].cpu().numpy()
+        
+        # Store opponent poses
+        all_opp_xs_shifted[env_mask] = opp_xs_shifted
+        all_opp_ys_shifted[env_mask] = opp_ys_shifted
+        all_opp_angles[env_mask] = opp_angles.numpy() if torch.is_tensor(opp_angles) else opp_angles
+        opp_current_wps_idx[env_mask] = opponent_selected_indices
+        
+    # Combine results while maintaining original order
+    ego_poses = list(zip(all_xs_shifted.tolist(), all_ys_shifted.tolist(), all_angles.tolist()))
+    opp_poses = list(zip(all_opp_xs_shifted.tolist(), all_opp_ys_shifted.tolist(), all_opp_angles.tolist()))
+
+    return ego_poses, current_wps_idx, opp_poses, opp_current_wps_idx
 
 def find_frenet_coord_along_waypoints(waypoints: torch.Tensor,  # Shape: [M, 2] - M waypoints
                          positions: torch.Tensor, # [N,2] - N environements

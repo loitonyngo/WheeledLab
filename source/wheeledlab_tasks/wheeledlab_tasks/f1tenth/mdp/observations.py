@@ -672,8 +672,10 @@ def opponent_frenet_info(
 
     ego_pos_xy_world = mdp.root_pos_w(env=env, asset_cfg=asset_cfg)[..., :2]
     ego_heading_w = env.scene[asset_cfg.name].data.heading_w
+    ego_vel_x = mdp.base_lin_vel(env=env, asset_cfg=asset_cfg)[..., 0]
 
     opp_pos_xy_world = mdp.root_pos_w(env=env, asset_cfg=opponent_cfg)[..., :2]
+    opp_vel_x = mdp.base_lin_vel(env=env, asset_cfg=opponent_cfg)[..., 0]
 
     if not hasattr(env, '_map_levels'):
         env._map_levels = torch.zeros(env.num_envs, 
@@ -685,15 +687,16 @@ def opponent_frenet_info(
     unique_map_levels = torch.unique(map_levels)
 
     num_envs              = ego_pos_xy_world.shape[0]
-    s_idx_diff_opp_ego    = -torch.ones(num_envs, device=env.device, dtype= torch.float32)*CONFIG['env_config']['OPPONENT_DETECTION_IDX']*CONFIG['env_config']['LEN_S_IDX']
-    cross_pos_opp_ego     = -torch.ones(num_envs, device = env.device, dtype=torch.float32)
-    opp_detected          = torch.zeros(num_envs, device = env.device, dtype=torch.long)
+    s_idx_diff_opp_ego    = torch.zeros(num_envs, device=env.device, dtype= torch.float32)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']*CONFIG['env_config']['LEN_S_IDX']
+    cross_pos_opp_ego     = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
+    d_diff_opp_ego        = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
 
+    vx_diff_opp_ego       = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
     # Process each map level separately
 
-    num_episodes = env.common_step_counter // env.max_episode_length
-    if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_EP']:
-        return torch.stack([s_idx_diff_opp_ego, cross_pos_opp_ego, opp_detected],dim=1)
+    # num_episodes = env.common_step_counter // env.max_episode_length
+    # if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_UNTIL_EP']:
+    #     return torch.stack([s_idx_diff_opp_ego, cross_pos_opp_ego, opp_detected],dim=1)
 
     for map_level in unique_map_levels:
         # Create mask for environments using this map
@@ -706,7 +709,7 @@ def opponent_frenet_info(
         # Get positions for these environments
         ego_map_positions = ego_pos_xy_world[env_mask]
         ego_map_headings =  ego_heading_w[env_mask]
-
+        ego_map_vel_x = ego_vel_x[env_mask]
         opp_map_positions = opp_pos_xy_world[env_mask]
 
         # Get waypoints and track data for this map level
@@ -720,21 +723,18 @@ def opponent_frenet_info(
         ego_current_s_idx, ego_current_d = find_frenet_coord_along_waypoints(waypoints_xy_world, ego_map_positions)
         opp_current_s_idx, opp_current_d = find_frenet_coord_along_waypoints(waypoints_xy_world, opp_map_positions)
 
-        d_diff            = opp_current_d     - ego_current_d
+        d_diff_opp_ego[env_mask]            = opp_current_d     - ego_current_d
         s_idx_diff_raw    = opp_current_s_idx - ego_current_s_idx
         s_idx_diff_signed = (s_idx_diff_raw + num_waypoints // 2) % num_waypoints - (num_waypoints // 2)
 
-        # s_idx_diff_ot = torch.where((s_idx_diff_signed > 0) & (s_idx_diff_signed <= CONFIG['env_config']['OPPONENT_DETECTION_IDX']),
+        # s_idx_diff_ot = torch.where((s_idx_diff_signed > 0) & (s_idx_diff_signed <= CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']),
         #                         s_idx_diff_signed, 
         #                         torch.zeros_like(s_idx_diff_signed))  
 
-        opp_detected[env_mask]       = torch.where(abs(s_idx_diff_signed) <= CONFIG['env_config']['OPPONENT_DETECTION_IDX'],
-                                       torch.ones(len(env_mask), device=env.device, dtype= torch.long), 
-                                       torch.zeros(len(env_mask), device=env.device, dtype= torch.long))  
+        s_idx_diff_opp_ego[env_mask] = s_idx_diff_signed*CONFIG['env_config']['LEN_S_IDX']
+        t_diff_opp_ego = s_idx_diff_opp_ego/(ego_map_vel_x+0.001)
+        t_diff_opp_ego = torch.clamp(t_diff_opp_ego, -10.0, 10.0)  
         
-        s_idx_diff_opp_ego[env_mask] = torch.where(opp_detected[env_mask].bool(),
-                                       s_idx_diff_signed*CONFIG['env_config']['LEN_S_IDX'], 
-                                       -torch.ones(len(env_mask), device=env.device, dtype= torch.float32)*CONFIG['env_config']['OPPONENT_DETECTION_IDX']*CONFIG['env_config']['LEN_S_IDX'])  
         # d_diff_opp_ego[env_mask]     = torch.where(opp_detected[env_mask].bool(),
         #                                d_diff, 
         #                                torch.zeros(len(env_mask), device=env.device, dtype= torch.float32))  
@@ -747,13 +747,12 @@ def opponent_frenet_info(
                                 - ego_map_heading_vec[:, 1] * ego_opp_vec[:, 0]) / (dist + 1e-6)
         ego_opp_positioning_vec_norm = torch.clamp(ego_opp_positioning_vec, -1.0, 1.0)
         
-        cross_pos_opp_ego[env_mask] = torch.where(opp_detected[env_mask].bool(),
-                                    ego_opp_positioning_vec_norm, 
-                                    -torch.ones(len(env_mask), device=env.device, dtype= torch.float32)) 
+        cross_pos_opp_ego[env_mask] = ego_opp_positioning_vec_norm
+        vx_diff_opp_ego[env_mask] = opp_vel_x - ego_vel_x
         
-    return torch.stack([s_idx_diff_opp_ego, cross_pos_opp_ego, opp_detected],dim=1)
+    return torch.stack([t_diff_opp_ego, d_diff_opp_ego, cross_pos_opp_ego, vx_diff_opp_ego],dim=1)
 
-def gap_overtake_info(
+def gaps_info(
     env: ManagerBasedEnv, 
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     opponent_cfg: SceneEntityCfg = SceneEntityCfg("opponent")
@@ -776,14 +775,16 @@ def gap_overtake_info(
 
     num_envs              = ego_pos_xy_world.shape[0]
 
-    gap_heading_error     = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
+    gap_inner_heading_error     = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
+    gap_outer_heading_error     = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
+
     opp_detected          = torch.zeros(num_envs, device = env.device, dtype=torch.long)
 
     # Process each map level separately
 
-    num_episodes = env.common_step_counter // env.max_episode_length
-    if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_EP']:
-        return torch.stack([gap_heading_error],dim=1)
+    # num_episodes = env.common_step_counter // env.max_episode_length
+    # if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_UNTIL_EP']:
+    #     return torch.stack([gap_inner_heading_error, gap_outer_heading_error],dim=1)
 
     for map_level in unique_map_levels:
         # Create mask for environments using this map
@@ -822,29 +823,37 @@ def gap_overtake_info(
         ego_current_s_idx, ego_current_d = find_frenet_coord_along_waypoints(waypoints_xy_world, ego_map_positions)
         opp_current_s_idx, opp_current_d = find_frenet_coord_along_waypoints(waypoints_xy_world, opp_map_positions)
 
-        s_idx_diff_raw    = opp_current_s_idx - ego_current_s_idx
-        s_idx_diff_signed = (s_idx_diff_raw + num_waypoints // 2) % num_waypoints - (num_waypoints // 2)
+        # s_idx_diff_raw    = opp_current_s_idx - ego_current_s_idx
+        # s_idx_diff_signed = (s_idx_diff_raw + num_waypoints // 2) % num_waypoints - (num_waypoints // 2)
 
-        opp_detected[env_mask]       = torch.where(abs(s_idx_diff_signed) <= CONFIG['env_config']['OPPONENT_DETECTION_IDX'],
-                                       torch.ones(len(env_mask), device=env.device, dtype= torch.long), 
-                                       torch.zeros(len(env_mask), device=env.device, dtype= torch.long))  
+        # opp_detected[env_mask]       = torch.where(abs(s_idx_diff_signed) <= CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX'],
+        #                                torch.ones(len(env_mask), device=env.device, dtype= torch.long), 
+        #                                torch.zeros(len(env_mask), device=env.device, dtype= torch.long))  
     
         gap_inner = torch.norm(opp_map_positions-inner_xy_world[opp_current_s_idx, :], dim=1)
         gap_outer = torch.norm(opp_map_positions-outer_xy_world[opp_current_s_idx, :], dim=1)
-        gap_center = torch.where((gap_inner <= gap_outer).unsqueeze(-1),
-                    (opp_map_positions + inner_xy_world[opp_current_s_idx, :])/2, 
-                    (opp_map_positions + outer_xy_world[opp_current_s_idx, :])/2)
-        # Calculate desired heading vectors [num_envs_in_map, n_horizon]
-        desired_headings_gap = torch.atan2(
-            gap_center[:, 1] - ego_map_positions[:, 1],
-            gap_center[:, 0] - ego_map_positions[:, 0]
-        )
-        # Calculate smallest angle differences [num_envs_in_map, n_horizon]
-        gap_heading_error[env_mask] = torch.where(opp_detected[env_mask].bool(),
-                                                torch.atan2(torch.sin(desired_headings_gap - ego_map_headings),torch.cos(desired_headings_gap - ego_map_headings)),
-                                                torch.zeros(len(env_mask), device=env.device, dtype= torch.float32))  
+        gap_inner_center =   (opp_map_positions + inner_xy_world[opp_current_s_idx, :])/2
+        gap_outer_center =   (opp_map_positions + outer_xy_world[opp_current_s_idx, :])/2
         
-    return torch.stack([gap_heading_error],dim=1)
+        
+        # Calculate desired heading vectors [num_envs_in_map, n_horizon]
+        desired_headings_gap_inner = torch.atan2(
+            gap_inner_center[:, 1] - ego_map_positions[:, 1],
+            gap_inner_center[:, 0] - ego_map_positions[:, 0]
+        )
+        
+        desired_headings_gap_outer = torch.atan2(
+            gap_outer_center[:, 1] - ego_map_positions[:, 1],
+            gap_outer_center[:, 0] - ego_map_positions[:, 0]
+        )
+        
+        # Calculate smallest angle differences [num_envs_in_map, n_horizon]
+        gap_inner_heading_error[env_mask] = torch.atan2(torch.sin(desired_headings_gap_inner - ego_map_headings),torch.cos(desired_headings_gap_inner - ego_map_headings))
+        gap_outer_heading_error[env_mask] = torch.atan2(torch.sin(desired_headings_gap_outer - ego_map_headings),torch.cos(desired_headings_gap_outer - ego_map_headings))
+        
+        car_width = 0.30
+        
+    return torch.stack([gap_inner-car_width, gap_inner_heading_error, gap_outer-car_width, gap_outer_heading_error],dim=1)
 
 def calculate_horizon_indices(
     current_idx: torch.Tensor,

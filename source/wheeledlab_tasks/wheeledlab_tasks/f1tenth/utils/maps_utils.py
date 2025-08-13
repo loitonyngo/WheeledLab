@@ -449,15 +449,24 @@ def set_hashmap_usd(map_name, hashmap, origin, map_size_pixels, map_size_meters,
 #         plane.CreateDisplayColorPrimvar(UsdGeom.Tokens.uniform).Set(face_colors_triangle)
 
 
-def set_points_usd(points, map_name, points_name, origin, map_size_meters, stage, color, x_min, y_min):
+def set_points_usd(points, map_name, points_name, origin, stage, color):
+    # points_usd = [
+    #     Gf.Vec3f(
+    #         wp[0]+(-map_size_meters[1]/2-x_min) + origin[0],  # X: Apply resolution and shift
+    #         wp[1]+(-map_size_meters[0]/2-y_min) + origin[1],  # Y
+    #         0.0                          # Z offset
+    #     ) 
+    #     for wp in points
+    # ]
     points_usd = [
         Gf.Vec3f(
-            wp[0]+(-map_size_meters[1]/2-x_min) + origin[0],  # X: Apply resolution and shift
-            wp[1]+(-map_size_meters[0]/2-y_min) + origin[1],  # Y
+            wp[0]+origin[0],  # X: Apply resolution and shift
+            wp[1]+origin[1],  # Y
             0.0                          # Z offset
         ) 
         for wp in points
     ]
+    
     points_prim = UsdGeom.Points.Define(stage, '/World/'+ map_name +'/'+ points_name)
     points_prim.GetPointsAttr().Set(points_usd)
     # Visual stylin
@@ -608,6 +617,35 @@ def load_waypoints(waypoints_path):
             marker['pose']['position']['y']] 
         for marker in waypoint_data['centerline_markers']['markers']
     ])
+    
+    opp_traj_iqp = np.array([
+        [wpnts['x_m'], 
+            wpnts['y_m'],
+            wpnts['psi_rad'],
+            wpnts['vx_mps'],
+            wpnts['ax_mps2']] 
+        for wpnts in waypoint_data['global_traj_wpnts_iqp']['wpnts']
+    ])
+
+    opp_traj_sp = np.array([
+        [wpnts['x_m'], 
+            wpnts['y_m'],
+            wpnts['psi_rad'],
+            wpnts['vx_mps'],
+            wpnts['ax_mps2']] 
+        for wpnts in waypoint_data['global_traj_wpnts_sp']['wpnts']
+    ])
+    
+    opp_traj_center = np.array([
+        [wpnts['x_m'], 
+            wpnts['y_m'],
+            wpnts['psi_rad'],
+            wpnts['vx_mps'],
+            wpnts['ax_mps2']] 
+        for wpnts in waypoint_data['centerline_waypoints']['wpnts']
+    ])
+    
+    
     trackbounds = np.array([
         [markers['pose']['position']['x'], 
             markers['pose']['position']['y']] 
@@ -630,7 +668,7 @@ def load_waypoints(waypoints_path):
         [wpnts['vx_mps']] 
         for wpnts in waypoint_data['centerline_waypoints']['wpnts']
     ])
-    return waypoints, trackbounds, d_lat, psi_rad, kappa_radpm, vx_mps
+    return waypoints, trackbounds, d_lat, psi_rad, kappa_radpm, vx_mps, opp_traj_center, opp_traj_iqp, opp_traj_sp
 
 # def load_waypoints(waypoints_path):
 #     try:

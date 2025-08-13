@@ -15,7 +15,7 @@ class LogConfig:
     '''
     logs_dir: str = WHEELEDLAB_RL_LOGS_DIR              # Directory for creating logs (if log_dir is not provided)
     no_log: bool = False                                # Disable logging
-    log_every: int = 25                                 # Log every n updates
+    log_every: int = 50                                 # Log every n updates
     video: bool = True                                  # Record videos during training
     video_length: int = 250                             # Length of the recorded video (in steps)
     video_interval: int = 5000                          # Interval between video recordings (in steps)
@@ -25,7 +25,7 @@ class LogConfig:
     wandb_project: str = "WheeledLab"                   # Wandb project name
     test_mode: bool = False                             # Test mode (disable logging, wandb, video, checkpoints). Overrides other flags
     model_save_dirname: str = "models"                  # Path to save the model under log_dir
-    video_resolution: tuple[int, int] = (640, 360)     # Resolution of the recorded video, Width x Height
+    video_resolution: tuple[int, int] = (1280, 720)     # Resolution of the recorded video, Width x Height
     video_crf: int = 50                                 # Constant Rate Factor for video compression
     run_name: str = f"run-{random.randint(0, 1e7)}"     # Name of the run
 
@@ -44,10 +44,10 @@ class TrainConfig:
     ''' Configuration for training '''
     seed: int = 0                       # Seed used for the environment
     device: str = "cuda:0"              # Device to use
-    load_run: Optional[str] = None    # Load a previously trained model
-    load_run_checkpoint: int = 0        # Load a specific checkpoint from a previously trained model
-    # load_run: Optional[str] = "volcanic-butterfly-1296"      # Load a previously trained model
-    # load_run_checkpoint: int = 350        # Load a specific checkpoint from a previously trained model
+    # load_run: Optional[str] = None    # Load a previously trained model
+    # load_run_checkpoint: int = 0        # Load a specific checkpoint from a previously trained model
+    load_run: Optional[str] = "vital-planet-1390"      # Load a previously trained model
+    load_run_checkpoint: int = 300        # Load a specific checkpoint from a previously trained model
 
     log: LogConfig = LogConfig()
 

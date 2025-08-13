@@ -118,66 +118,147 @@ def wall_collision(env):
     return collision_bool.bool()
 
 def opponent_collision(env):
-    num_episodes = env.common_step_counter // env.max_episode_length
-    if num_episodes <  CONFIG['env_config']['IGNORE_OPPONENT_EP']:
-        return torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
+    # num_episodes = env.common_step_counter // env.max_episode_length
+    # if num_episodes <  CONFIG['env_config']['IGNORE_OPPONENT_UNTIL_EP']:
+    #     return torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
     
     if not hasattr(env, '_prev_delta_s_opp_ego'):
         env._prev_delta_s_opp_ego = torch.ones(env.num_envs, 
                                 dtype=torch.float32,
-                                device=env.device)*CONFIG['env_config']['OPPONENT_DETECTION_IDX']*CONFIG['env_config']['LEN_S_IDX']
+                                device=env.device)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']*CONFIG['env_config']['LEN_S_IDX']
         
         
-    ego_position_xy = env.scene["robot"].data.root_pos_w[:, :2]
-    opp_position_xy = env.scene["opponent"].data.root_pos_w[:, :2]
+    ego_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("robot"))[..., :2]
+    opp_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("opponent"))[:, :2]
     
     dist = torch.norm(ego_position_xy - opp_position_xy, p=2, dim=1)
-
-
     opp_collision = dist < CONFIG['env_config']['OPP_COLLISION_RADIUS']
 
-    
     return opp_collision.bool()
 
-def is_reverse(env):
-    reverse = reverse_waypoint_bool(env)
-    return reverse
+def opponent_overtaken(env):
 
-def reverse_waypoint_bool(env):
-    # Safe access to buffer with fallback
-    if not hasattr(env, '_progress_history_indices'):
-        env._progress_history_indices = torch.zeros(env.num_envs, 
-                                               dtype=torch.long,
-                                               device=env.device)
+    # num_episodes = env.common_step_counter // env.max_episode_length
+    # if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_UNTIL_EP']:
+    #     return torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
+    
+    ego_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("robot"))[..., :2]
+    opp_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("opponent"))[:, :2]
+
+    if not hasattr(env, '_map_levels'):
+        env._map_levels = torch.zeros(env.num_envs, 
+                                dtype=torch.long,
+                                device=env.device)
         
-    num_episodes = env.common_step_counter // env.max_episode_length
-    if num_episodes < 10:
-        return torch.zeros(env.num_envs, device=env.device) == 0
+    map_levels = env._map_levels  # shape: [num_envs]
+    unique_map_levels = torch.unique(map_levels)
     
-    # Get current positions and waypoints
-    position_xy = env.scene["robot"].data.root_pos_w[:, :2]
-    # waypoints = torch.tensor(env.scene.terrain.cfg.waypoints_list[0], 
-    #                        device=env.device)[:, :2]
+    # Initialize outputs
+    delta_s_opp_ego       = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
+    overtaken_bool        = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    
+    # ego_behind_opp_bool  = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    # current_indices = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+    
+    # Process each map level separately
+    for map_level in unique_map_levels:
+        env_mask = (map_levels == map_level)
+        # num_envs_in_map = env_mask.sum()
+        
+        # if num_envs_in_map == 0:
+        #     continue
+            
+        # Get waypoints for this map level
+        waypoints_world = torch.tensor(
+            env.scene.terrain.cfg.waypoints_list[map_level], 
+            device=env.device
+        )[:, :2]
+        num_waypoints = len(waypoints_world)
+        
+        inner_xy_world = torch.tensor(
+            env.scene.terrain.cfg.inner_list[map_level],
+            device=env.device,
+            dtype=torch.float32
+        )[:, :2]
 
-    waypoints = torch.tensor(env.scene.terrain.cfg.inner_list[0], 
-                           device=env.device)[:, :2]
-    
-    # Find nearest waypoint
-    current_idx, _ = find_frenet_coord_along_waypoints(waypoints, position_xy)
-    
+        # Find nearest waypoint for these environments
+        ego_current_idx, _ = find_frenet_coord_along_waypoints(
+            inner_xy_world, 
+            ego_position_xy[env_mask]
+        )
+        opp_current_idx, _ = find_frenet_coord_along_waypoints(
+            inner_xy_world, 
+            opp_position_xy[env_mask]
+        )
 
-    if current_idx == 0:
-        return torch.zeros(env.num_envs, device=env.device) == 1
-    
-    # Handle lap transitions by checking modulo distance
-    num_waypoints = len(waypoints)
+        delta_s_opp_ego[env_mask] = ((opp_current_idx-ego_current_idx + num_waypoints//2) % num_waypoints - num_waypoints // 2).float()
 
-    progress = current_idx - env._progress_history_indices
+        
+    overtaken_bool = torch.where(
+                                delta_s_opp_ego < -30,
+                                torch.ones_like(delta_s_opp_ego, dtype=torch.bool),
+                                torch.zeros_like(delta_s_opp_ego, dtype=torch.bool)
+                            )
     
-    # Consider progress if moved forward (even across lap boundary)
-    reverse_bool = progress < 0
+    return overtaken_bool
+
+def far_from_opponent(    
+        env: ManagerBasedEnv, 
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+        opponent_cfg: SceneEntityCfg = SceneEntityCfg("opponent")
+    ) -> torch.Tensor:
     
-    # Update stored indices
-    env._progress_history_indices = current_idx.clone()
+    # num_episodes = env.common_step_counter // env.max_episode_length
+    # if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_UNTIL_EP']:
+    #     return torch.zeros(env.num_envs, device=env.device, dtype=torch.long)
+        
+    ego_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("robot"))[..., :2]
+    opp_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("opponent"))[:, :2]
+
+    if not hasattr(env, '_map_levels'):
+        env._map_levels = torch.zeros(env.num_envs, 
+                                dtype=torch.long,
+                                device=env.device)
+        
+    map_levels = env._map_levels  # shape: [num_envs]
+    unique_map_levels = torch.unique(map_levels)
     
-    return reverse_bool
+    # Initialize outputs
+    delta_s_opp_ego       = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
+    far_from_opponent_bool = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    
+    # ego_behind_opp_bool  = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    # current_indices = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+    
+    # Process each map level separately
+    for map_level in unique_map_levels:
+        env_mask = (map_levels == map_level)
+        num_envs_in_map = env_mask.sum()
+        
+        if num_envs_in_map == 0:
+            continue
+            
+        # Get waypoints for this map level
+        waypoints_world = torch.tensor(
+            env.scene.terrain.cfg.waypoints_list[map_level], 
+            device=env.device
+        )[:, :2]
+        num_waypoints = len(waypoints_world)
+
+        # Find nearest waypoint for these environments
+        ego_current_idx, _ = find_frenet_coord_along_waypoints(
+            waypoints_world, 
+            ego_position_xy[env_mask]
+        )
+        opp_current_idx, _ = find_frenet_coord_along_waypoints(
+            waypoints_world, 
+            opp_position_xy[env_mask]
+        )
+
+        delta_s_opp_ego[env_mask] = ((opp_current_idx-ego_current_idx + num_waypoints//2) % num_waypoints - num_waypoints // 2).float()
+    
+    far_from_opponent_bool[env_mask] = torch.where(abs(delta_s_opp_ego) > CONFIG['env_config']['OPPONENT_FAR_AWAY_IDX']*CONFIG['env_config']['LEN_S_IDX'],
+                                                    torch.ones_like(delta_s_opp_ego, dtype=torch.bool),
+                                                    torch.zeros_like(delta_s_opp_ego, dtype=torch.bool))  
+        
+    return far_from_opponent_bool.bool()
