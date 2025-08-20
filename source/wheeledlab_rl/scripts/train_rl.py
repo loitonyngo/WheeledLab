@@ -48,6 +48,8 @@ def main(run_cfg: RunConfig): # TODO: Add SB3 config support
         import wandb
         run = wandb.init(
             project=log_cfg.wandb_project,
+            name=log_cfg.run_name
+            
         )
         log_cfg.run_name = wandb.run.name
 

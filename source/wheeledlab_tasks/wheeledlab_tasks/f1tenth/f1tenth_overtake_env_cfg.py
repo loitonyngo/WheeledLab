@@ -47,7 +47,7 @@ from .mdp import reset_root_state_random_with_opponent, reset_root_state_start_i
 from .mdp.observations import *
 from .mdp.rewards import *
 from .mdp.terminations import *
-from .mdp.events import move_opponent
+from .mdp.events import move_opponent_s_based, move_opponent_vel_based
 
 
 import omni.usd
@@ -213,32 +213,42 @@ class F1TenthOvertakeTerrainImporterCfg(TerrainImporterCfg):
     )
     debug_vis = True
     
-    def generate_random_poses_from_waypoints_with_opponent(self, env : ManagerBasedEnv, env_ids, num_poses, max_radius_offset=0.3):
-        
+    def generate_random_poses_from_waypoints_with_opponent(self, env: ManagerBasedEnv, env_ids, num_poses, max_radius_offset=0.3):
         # generate random initial poses with margin
         env_origins = env.scene.env_origins
         map_levels = env._map_levels
-        # add which map level
-
-        init_poses, init_current_wps_idx, opp_init_poses, opp_init_current_wps_idx = generate_random_poses_from_waypoints_with_opponent(env_ids, num_poses, map_levels, env_origins, self.waypoints_list, self.inner_list, max_radius_offset=0.3)
-        # init_poses, init_current_wps_idx = generate_random_poses_from_list(env_ids, num_poses, map_levels, env_origins, self.origin_list, self.row_spacing_list, self.col_spacing_list, self.traversability_hashmap_list, self.waypoints_list, self.outer_list, self.inner_list, margin=0.1)
+        
+        # Get poses and velocities from the helper function
+        init_poses, init_current_wps_idx, ego_velocities, opp_init_poses, opp_init_current_wps_idx, opp_velocities = generate_random_poses_from_waypoints_with_opponent(
+            env_ids, num_poses, map_levels, env_origins, 
+            self.waypoints_list, self.inner_list, self.vx_mps_list, 
+            max_radius_offset=0.3
+        )
+        
         max_radius_offset = 0.5
         valid_init_poses = [
             InitialPoseCfg(
-                pos=(x + random.uniform(-1,1)*max_radius_offset, y + random.uniform(-1,1)*max_radius_offset, 0.02),
-                rot_euler_xyz_deg=(0., 0., angle)
-            ) for x, y, angle in init_poses
+                pos=(x + random.uniform(-1,1)*max_radius_offset, 
+                y + random.uniform(-1,1)*max_radius_offset, 
+                0.02),
+                rot_euler_xyz_deg=(0., 0., angle),
+                lin_vel=(vx*0.9, vy*0.9, 0.0),  # Add linear velocity
+                ang_vel=(0.0, 0.0, 0.0)  # Angular velocity is zero
+            ) for (x, y, angle), (vx, vy) in zip(init_poses, ego_velocities)
         ]
         
         opp_valid_init_poses = [
             InitialPoseCfg(
-                pos=(x + random.uniform(-1,1)*max_radius_offset, y + random.uniform(-1,1)*max_radius_offset, 0.02),
-                rot_euler_xyz_deg=(0., 0., angle)
-            ) for x, y, angle in opp_init_poses
+                pos=(x + random.uniform(-1,1)*max_radius_offset, 
+                    y + random.uniform(-1,1)*max_radius_offset, 
+                    0.02),
+                rot_euler_xyz_deg=(0., 0., angle),
+                lin_vel=(0, 0, 0.0),  # Add linear velocity for opponent
+                ang_vel=(0.0, 0.0, 0.0)  # Angular velocity is zero
+            ) for (x, y, angle), (vx, vy) in zip(opp_init_poses, opp_velocities)
         ]
                 
         return valid_init_poses, init_current_wps_idx, opp_valid_init_poses, opp_init_current_wps_idx
-
     # def generate_start_idx_poses(self, env : ManagerBasedEnv, env_ids, num_poses):
         
     #     # generate random initial poses with margin
@@ -289,7 +299,7 @@ class F1TenthOvertakeSceneCfg(InteractiveSceneCfg):
     opponent = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Opponent",
         spawn=sim_utils.CylinderCfg(
-            radius=0.2,
+            radius=CONFIG['env_config']['OPP_SIZE_RADIUS'],
             height=0.1,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 kinematic_enabled= False, 
@@ -369,10 +379,10 @@ class F1TenthOvertakeEventsCfg:
             mode="reset",
         )
 
-    move_opponent = EventTerm(
-        func=move_opponent,
+    move_opponent_s_based = EventTerm(
+        func=move_opponent_s_based,
         mode="interval",
-        interval_range_s=(0.05, 0.05)
+        interval_range_s=(CONFIG['env_config']['OPP_MOVE_DT'] , CONFIG['env_config']['OPP_MOVE_DT'] )
     )
     
     
@@ -523,18 +533,22 @@ class F1TenthOvertakeRewardsCfg:
 
     opponent_collision_penalty = RewTerm(
         func=opponent_collision_penalty,
-        weight=10,
+        weight=1,
     )
 
-
+    opponent_overtake_completed_reward = RewTerm(
+        func=opponent_overtake_completed_reward,
+        weight=1,
+    )
+    
     opponent_overtake_distance_reward = RewTerm(
         func=opponent_overtake_distance_reward,
-        weight=0.1,
+        weight=0.001,
     )
 
     opponent_overtake_delta_distance_reward = RewTerm(
         func=opponent_overtake_delta_distance_reward,
-        weight=0.1,
+        weight=0.0,
     )
 
     # opponent_overtake_positioning_reward = RewTerm(
@@ -670,35 +684,20 @@ class F1TenthOvertakeTerminationsCfg:
             func=opponent_overtaken,
     )
     
-    # far_from_opponent = DoneTerm(
-    #     func=far_from_opponent,
-    # )
+    far_from_opponent = DoneTerm(
+        func=far_from_opponent,
+    )
     
     opponent_collision = DoneTerm(
             func=opponent_collision
     )
-    
-    # Car rolls over
-    # rollover = DoneTerm(
-    #     func=upright_bool,
-    #     params={"thresh_deg": 90.},
-    # )
 
     # Car goes out of track
     if CONFIG['env_config']['NON_TRAVERSABLE_TERMINATION']:
-        # non_traversable = DoneTerm(
-        #     func=is_not_traversable
-        # )
 
         wall_collision = DoneTerm(
             func=wall_collision
         )
-
-
-
-    # out_range = DoneTerm(
-    #     func=out_of_map,
-    # )
 
 
 @configclass
@@ -881,7 +880,13 @@ class F1TenthOvertakeEnv(ManagerBasedEnv):
             dtype=torch.long,
             device=self.device
         )
-
+        
+        self._wall_collision_history = torch.zeros(
+            (self.num_envs, self._rew_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.long,
+            device=self.device
+        )
+        
         # Bool to determine if the car has just reset; it is set to True when a new pose is generated, and afterwards immediately set to false 
         self._reset_env_bool = torch.zeros(  # Tracks where to insert the next index
             self.num_envs,
@@ -929,6 +934,30 @@ class F1TenthOvertakeEnv(ManagerBasedEnv):
         self._opponent_vel_scaling = torch.ones(
             self.num_envs,  # Shape: (num_envs, history_length, n_actions)
             dtype=torch.float16,
+            device=self.device
+        )
+
+        self._opponent_overtaken_bool = torch.zeros(
+            self.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.bool,
+            device=self.device
+        )
+
+        self._opponent_speed = torch.zeros(
+            self.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=self.device
+        )
+
+        self._opponent_d_dot = torch.zeros(
+            self.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=self.device
+        )
+        
+        self._opponent_heading = torch.zeros(
+            self.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
             device=self.device
         )
         

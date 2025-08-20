@@ -273,32 +273,6 @@ class F1TenthTimeTrialSceneCfg(InteractiveSceneCfg):
     )
 
     robot: AssetBaseCfg = F1TENTH_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-    # opponent: AssetBaseCfg = OPPONENT_CFG.replace(prim_path="{ENV_REGEX_NS}/Opponent")
-
-    
-       # Add cuboid configuration
-    # opponent = RigidObjectCfg(
-    #     prim_path="{ENV_REGEX_NS}/Opponent",
-    #     spawn=sim_utils.CuboidCfg(
-    #         size = (0.6, 0.35, 0.3),
-    #         rigid_props=sim_utils.RigidBodyPropertiesCfg(
-    #             kinematic_enabled= False, 
-    #             rigid_body_enabled=True,
-    #             solver_position_iteration_count=4,
-    #             solver_velocity_iteration_count=1,
-    #             max_angular_velocity=100.0,
-    #             max_linear_velocity=100.0,
-    #             max_depenetration_velocity=0.00001,
-    #             disable_gravity=True,
-    #         ),
-    #         physics_material=sim_utils.RigidBodyMaterialCfg(
-    #             static_friction=0.5,
-    #             dynamic_friction=0.5,
-    #             restitution=0.5,
-    #         ),
-    #     ),
-    #     init_state=RigidObjectCfg.InitialStateCfg(pos=(0.0, 0.0, 0.0)),  # 10cm above ground
-    # )
 
     ground.init_state.pos = (0.0, 0.0, -1e-4)
 
@@ -509,20 +483,15 @@ class F1TenthTimeTrialRewardsCfg:
         weight=1,
     )
 
-    opponent_collision_penalty = RewTerm(
-        func=opponent_collision_penalty,
-        weight=1,
-    )
-   
     var_throttle_penalty =  RewTerm(
         func=var_throttle_penalty,
         weight=0.03,
     )
 
-    var_throttle_rate_penalty =  RewTerm(
-        func=var_throttle_rate_penalty,
-        weight=0.00,
-    )
+    # var_throttle_rate_penalty =  RewTerm(
+    #     func=var_throttle_rate_penalty,
+    #     weight=0.00,
+    # )
     # delta_throttle_l2_penalty =  RewTerm(
     #     func=delta_throttle_l2_penalty,
     #     weight=0.0,
@@ -551,18 +520,6 @@ class F1TenthTimeTrialRewardsCfg:
     #     func=delta_speed_cmd_penalty,
     #     weight=0.000,
     # )
-    
-    # opponent_overtake_closing_reward = RewTerm(
-    #     func=opponent_overtake_closing_reward,
-    #     weight=1,
-    # )
-
-    # opponent_overtake_positioning_reward = RewTerm(
-    #     func=opponent_overtake_positioning_reward,
-    #     weight=0.01,
-    # )
-    
- 
 
 
     if CONFIG['env_config']['CONSTANT_SPEED']:

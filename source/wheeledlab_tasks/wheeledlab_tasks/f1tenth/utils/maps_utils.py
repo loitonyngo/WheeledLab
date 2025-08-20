@@ -577,7 +577,131 @@ def match_by_projection(centerline, outer, inner):
     
     return outer_matched, inner_matched
 
+import numpy as np
+from scipy.spatial import cKDTree
+from scipy.interpolate import interp1d
 
+def match_boundaries_open(centerline, outer, inner, densify=12):
+    """
+    Open-loop, arc-length-binned matching.
+    Returns (outer_matched, inner_matched) with the SAME length/order as centerline.
+    
+    Parameters
+    ----------
+    centerline : (N, 2) float
+    outer      : (M, 2) float
+    inner      : (K, 2) float
+    densify    : int, dense samples per centerline point for projection robustness
+    """
+    center = np.asarray(centerline, dtype=float)
+    out_pts = np.asarray(outer, dtype=float)
+    in_pts  = np.asarray(inner, dtype=float)
+    N = len(center)
+    if N < 2:
+        raise ValueError("centerline must have at least 2 points")
+
+    # --- 1) Arc-length along centerline (OPEN loop) ---
+    seg = center[1:] - center[:-1]
+    seg_len = np.linalg.norm(seg, axis=1)
+    s_center = np.zeros(N)
+    s_center[1:] = np.cumsum(seg_len)
+    L = s_center[-1]
+
+    # Dense centerline (no wrap)
+    dense_s = np.linspace(0.0, L, N * densify)
+    fx = interp1d(s_center, center[:, 0], kind='linear', bounds_error=False, fill_value="extrapolate")
+    fy = interp1d(s_center, center[:, 1], kind='linear', bounds_error=False, fill_value="extrapolate")
+    dense = np.column_stack([fx(dense_s), fy(dense_s)])
+
+    # KD-tree for projection to dense centerline
+    dense_tree = cKDTree(dense)
+
+    def project_to_s(points):
+        # For each boundary point, take nearest dense sample => s value
+        _, idx = dense_tree.query(points)
+        return dense_s[idx], points
+
+    # --- 2) Project boundaries to arc length ---
+    out_s, out_xy = project_to_s(out_pts)
+    in_s,  in_xy  = project_to_s(in_pts)
+
+    # --- 3) Build OPEN arc-length bins around each centerline index ---
+    # Bin edges are midpoints in s between consecutive centerline samples
+    edges = np.empty(N + 1)
+    edges[1:-1] = 0.5 * (s_center[:-1] + s_center[1:])
+    # Extrapolate first and last edges
+    first_gap = s_center[1] - s_center[0]
+    last_gap  = s_center[-1] - s_center[-2]
+    edges[0] = s_center[0] - 0.5 * first_gap
+    edges[-1] = s_center[-1] + 0.5 * last_gap
+
+    # --- 4) Helper to bin by s and take robust medians, then interpolate missing bins ---
+    def match_one_boundary(boundary_s, boundary_xy):
+        # Assign each boundary point to a centerline index via s-bin
+        bin_idx = np.clip(np.digitize(boundary_s, edges) - 1, 0, N - 1)
+
+        # Collect medians per bin
+        matched = np.full((N, 2), np.nan, dtype=float)
+        # To avoid recomputing, gather indices for each bin
+        for i in range(N):
+            hits = (bin_idx == i)
+            if np.any(hits):
+                # robust median per coordinate
+                matched[i] = np.median(boundary_xy[hits], axis=0)
+
+        # Fill NaNs along s (OPEN: no wrap)
+        valid = ~np.isnan(matched[:, 0])
+        if valid.any():
+            # Interpolate x and y separately over s_center
+            xi = np.interp(s_center, s_center[valid], matched[valid, 0])
+            yi = np.interp(s_center, s_center[valid], matched[valid, 1])
+            matched = np.column_stack([xi, yi])
+        else:
+            # Degenerate: no points at all
+            matched[:] = np.nan
+
+        return matched
+
+    outer_matched = match_one_boundary(out_s, out_xy)
+    inner_matched = match_one_boundary(in_s, in_xy)
+
+    return outer_matched, inner_matched
+
+import matplotlib.pyplot as plt
+
+def plot_track_boundaries(centerline, outer_matched, inner_matched):
+    """
+    Plot the centerline, outer boundary, and inner boundary of the track.
+    
+    Parameters:
+    - centerline: Array of centerline points (Nx2)
+    - outer_matched: Array of outer boundary points (Nx2)
+    - inner_matched: Array of inner boundary points (Nx2)
+    """
+    plt.figure(figsize=(10, 10))
+    
+    # Plot centerline
+    plt.plot(centerline[:, 0], centerline[:, 1], 'b-', label='Centerline', linewidth=2)
+    plt.plot(centerline[:, 0], centerline[:, 1], 'bo', markersize=3)
+    
+    # Plot outer boundary
+    plt.plot(outer_matched[:, 0], outer_matched[:, 1], 'r-', label='Outer Boundary', linewidth=2)
+    plt.plot(outer_matched[:, 0], outer_matched[:, 1], 'ro', markersize=3)
+    
+    # Plot inner boundary
+    plt.plot(inner_matched[:, 0], inner_matched[:, 1], 'g-', label='Inner Boundary', linewidth=2)
+    plt.plot(inner_matched[:, 0], inner_matched[:, 1], 'go', markersize=3)
+    
+    # Add labels and legend
+    plt.title('Track Boundaries')
+    plt.xlabel('X coordinate')
+    plt.ylabel('Y coordinate')
+    plt.legend()
+    plt.grid(True)
+    plt.axis('equal')  # Important for proper aspect ratio
+    
+    plt.show()
+    
 def load_yaml(yaml_path):
     with open(yaml_path, 'r') as f:
         yaml_data = yaml.safe_load(f)
@@ -645,7 +769,7 @@ def load_waypoints(waypoints_path):
         for wpnts in waypoint_data['centerline_waypoints']['wpnts']
     ])
     
-    
+
     trackbounds = np.array([
         [markers['pose']['position']['x'], 
             markers['pose']['position']['y']] 

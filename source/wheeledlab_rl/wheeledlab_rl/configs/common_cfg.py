@@ -44,11 +44,11 @@ class TrainConfig:
     ''' Configuration for training '''
     seed: int = 0                       # Seed used for the environment
     device: str = "cuda:0"              # Device to use
-    # load_run: Optional[str] = None    # Load a previously trained model
-    # load_run_checkpoint: int = 0        # Load a specific checkpoint from a previously trained model
-    load_run: Optional[str] = "vital-planet-1390"      # Load a previously trained model
-    load_run_checkpoint: int = 300        # Load a specific checkpoint from a previously trained model
-
+    load_run: Optional[str] = None    # Load a previously trained model
+    load_run_checkpoint: int = 0        # Load a specific checkpoint from a previously trained model
+    # load_run: Optional[str] = "init_with_d_dot_BRA"      # Load a previously trained model
+    # load_run_checkpoint: int = 150        # Load a
+    
     log: LogConfig = LogConfig()
 
 @configclass

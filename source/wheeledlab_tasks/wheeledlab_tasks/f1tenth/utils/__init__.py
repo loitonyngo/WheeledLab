@@ -35,8 +35,10 @@ def create_maps_from_waypoints(maps_folder_path, map_name_list, origin_list, sta
         # Load and process waypoints data
         waypoints, trackbounds, d_lat, psi_rad, kappa_radpm, vx_mps, opp_traj_center, opp_traj_iqp, opp_traj_sp = load_waypoints(waypoints_path)
         outer, inner = separate_and_align_bounds(waypoints, trackbounds)
-        outer, inner = match_by_projection(waypoints, outer, inner)
-        
+        outer, inner = match_boundaries_open(waypoints, outer, inner)
+
+        # plot_track_boundaries(waypoints, outer, inner)
+
         # Store intermediate results
         map_data.append({
             'waypoints': waypoints,
@@ -99,10 +101,15 @@ def create_maps_from_waypoints(maps_folder_path, map_name_list, origin_list, sta
             stage, [(0.0, 0.0, 1.0)]
         )
 
-        opp_traj_usd = set_points_usd(
-            data['opp_traj_iqp'][:,0:2], map_name, 'opp_traj', origin_list[i], 
+        opp_traj_iqp_usd = set_points_usd(
+            data['opp_traj_iqp'][:,0:2], map_name, 'opp_traj_iqp', origin_list[i], 
             stage, [(1.0, 1.0, 0.0)]
         )
+        opp_traj_sp_usd = set_points_usd(
+            data['opp_traj_sp'][:,0:2], map_name, 'opp_traj_sp', origin_list[i], 
+            stage, [(0.0, 1.0, 1.0)]
+        )
+
         
         # Store results (convert to lists at the end)
         hashmap_list.append([])
@@ -413,10 +420,17 @@ def generate_random_poses_from_waypoints(env_ids, num_poses, map_levels, env_ori
     
     return poses, current_wps_idx
 
-def generate_random_poses_from_waypoints_with_opponent(env_ids, num_poses, map_levels, env_origins, waypoints_usd_list, inner_usd_list, max_radius_offset=1):
+def generate_random_poses_from_waypoints_with_opponent(env_ids, num_poses, map_levels, env_origins, waypoints_usd_list, inner_usd_list, vx_mps_list, max_radius_offset=1):
     """
     Generate random poses by selecting from waypoints, supporting multiple maps based on map_level.
     Only generates poses for environments specified in env_ids.
+    Returns:
+        ego_poses: List of (x, y, angle) tuples for ego cars
+        current_wps_idx: Array of waypoint indices for ego cars
+        ego_velocities: List of (vx, vy) tuples for ego cars in world frame
+        opp_poses: List of (x, y, angle) tuples for opponent cars
+        opp_current_wps_idx: Array of waypoint indices for opponent cars
+        opp_velocities: List of (vx, vy) tuples for opponent cars in world frame
     """
     # Convert inputs to numpy/torch as needed
     env_ids_np = env_ids.cpu().numpy() if torch.is_tensor(env_ids) else np.array(env_ids)
@@ -430,11 +444,15 @@ def generate_random_poses_from_waypoints_with_opponent(env_ids, num_poses, map_l
     all_ys_shifted = np.zeros(len(env_ids))
     current_wps_idx = np.zeros(len(env_ids))
     all_angles = np.zeros(len(env_ids))
+    all_vx = np.zeros(len(env_ids))
+    all_vy = np.zeros(len(env_ids))
     
     all_opp_xs_shifted = np.zeros(len(env_ids))
     all_opp_ys_shifted = np.zeros(len(env_ids))
     opp_current_wps_idx = np.zeros(len(env_ids))
     all_opp_angles = np.zeros(len(env_ids))
+    all_opp_vx = np.zeros(len(env_ids))
+    all_opp_vy = np.zeros(len(env_ids))
     
     # Process each unique map_level separately among the requested environments
     unique_map_levels = np.unique(requested_map_levels)
@@ -451,6 +469,8 @@ def generate_random_poses_from_waypoints_with_opponent(env_ids, num_poses, map_l
         # Get the waypoints for this map_level
         waypoints_xy = torch.tensor(waypoints_usd_list[map_level])[:, :2].to(torch.float32)
         inner_xy = torch.tensor(inner_usd_list[map_level])[:, :2].to(torch.float32)
+        speed = torch.tensor(vx_mps_list[map_level]).to(torch.float32)
+        
         num_waypoints = len(waypoints_xy)
         
         # Randomly select waypoints for each environment
@@ -468,7 +488,13 @@ def generate_random_poses_from_waypoints_with_opponent(env_ids, num_poses, map_l
         next_waypoints = waypoints_xy[next_indices]
         
         deltas = next_waypoints - selected_waypoints
-        angles = torch.rad2deg(torch.atan2(deltas[:, 1], deltas[:, 0])) + np.random.uniform(-15, 15, size=len(current_env_ids))
+        angles = torch.atan2(deltas[:, 1], deltas[:, 0])  # Keep in radians for velocity calculation
+        angles_deg = torch.rad2deg(angles) + np.random.uniform(-15, 15, size=len(current_env_ids))
+        
+        # Get velocities from the speed list and convert to world frame
+        ego_speeds = speed[selected_indices].numpy().flatten()
+        vx = ego_speeds * np.cos(angles.numpy())
+        vy = ego_speeds * np.sin(angles.numpy())
         
         # Shift the coordinates according to env_origins for the reset
         xs_shifted = xs + env_origins[current_env_ids, 0].cpu().numpy() 
@@ -477,10 +503,12 @@ def generate_random_poses_from_waypoints_with_opponent(env_ids, num_poses, map_l
         # Store results in the output arrays at the correct positions
         all_xs_shifted[env_mask] = xs_shifted
         all_ys_shifted[env_mask] = ys_shifted
-        all_angles[env_mask] = angles.numpy() if torch.is_tensor(angles) else angles
+        all_angles[env_mask] = angles_deg.numpy() if torch.is_tensor(angles_deg) else angles_deg
         current_wps_idx[env_mask] = selected_indices
+        all_vx[env_mask] = vx
+        all_vy[env_mask] = vy
 
-        # Get opponent positions and angles
+        # Get opponent positions, angles and velocities
         opponent_waypoints = waypoints_xy[opponent_selected_indices]
         opp_xs = opponent_waypoints[:, 0].numpy()
         opp_ys = opponent_waypoints[:, 1].numpy()
@@ -489,23 +517,33 @@ def generate_random_poses_from_waypoints_with_opponent(env_ids, num_poses, map_l
         opp_next_indices = (opponent_selected_indices + lookahead) % num_waypoints
         opp_next_waypoints = waypoints_xy[opp_next_indices]
         opp_deltas = opp_next_waypoints - opponent_waypoints
-        opp_angles = torch.rad2deg(torch.atan2(opp_deltas[:, 1], opp_deltas[:, 0])) 
+        opp_angles = torch.atan2(opp_deltas[:, 1], opp_deltas[:, 0])  # Keep in radians for velocity calculation
+        opp_angles_deg = torch.rad2deg(opp_angles)
+        
+        # Get opponent velocities and convert to world frame
+        opp_speeds = speed[opponent_selected_indices].numpy().flatten() 
+        opp_vx = opp_speeds * np.cos(opp_angles.numpy())
+        opp_vy = opp_speeds * np.sin(opp_angles.numpy())
         
         # Shift opponent coordinates according to env_origins
         opp_xs_shifted = opp_xs + env_origins[current_env_ids, 0].cpu().numpy()
         opp_ys_shifted = opp_ys + env_origins[current_env_ids, 1].cpu().numpy()
         
-        # Store opponent poses
+        # Store opponent poses and velocities
         all_opp_xs_shifted[env_mask] = opp_xs_shifted
         all_opp_ys_shifted[env_mask] = opp_ys_shifted
-        all_opp_angles[env_mask] = opp_angles.numpy() if torch.is_tensor(opp_angles) else opp_angles
+        all_opp_angles[env_mask] = opp_angles_deg.numpy() if torch.is_tensor(opp_angles_deg) else opp_angles_deg
         opp_current_wps_idx[env_mask] = opponent_selected_indices
+        all_opp_vx[env_mask] = opp_vx
+        all_opp_vy[env_mask] = opp_vy
         
     # Combine results while maintaining original order
     ego_poses = list(zip(all_xs_shifted.tolist(), all_ys_shifted.tolist(), all_angles.tolist()))
+    ego_velocities = list(zip(all_vx.tolist(), all_vy.tolist()))
     opp_poses = list(zip(all_opp_xs_shifted.tolist(), all_opp_ys_shifted.tolist(), all_opp_angles.tolist()))
+    opp_velocities = list(zip(all_opp_vx.tolist(), all_opp_vy.tolist()))
 
-    return ego_poses, current_wps_idx, opp_poses, opp_current_wps_idx
+    return ego_poses, current_wps_idx, ego_velocities, opp_poses, opp_current_wps_idx, opp_velocities
 
 def find_frenet_coord_along_waypoints(waypoints: torch.Tensor,  # Shape: [M, 2] - M waypoints
                          positions: torch.Tensor, # [N,2] - N environements

@@ -9,10 +9,10 @@ from wheeledlab_rl.configs import (
 timestamp = datetime.now().strftime("%Y%m%d_%H%M")
 
 @configclass
-class RSS_TEST(RslRlRunConfig):
+class RSS_TEST_TIMETRIAL(RslRlRunConfig):
     env_setup = EnvSetup(
-        num_envs=64,
-        env_spacing= 30,
+        num_envs=128,
+        env_spacing= 12,
         task_name="Isaac-F1TenthTimeTrialRL-v0"
     )
     # unique-jazz-683
@@ -33,7 +33,7 @@ class RSS_TEST(RslRlRunConfig):
 class RSS_TEST_OVERTAKE(RslRlRunConfig):
     env_setup = EnvSetup(
         num_envs=64,
-        env_spacing= 30,
+        env_spacing= 18,
         task_name="Isaac-F1TenthOvertakeRL-v0"
     )
     # unique-jazz-683

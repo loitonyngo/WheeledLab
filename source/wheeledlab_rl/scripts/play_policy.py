@@ -30,7 +30,7 @@ parser = argparse.ArgumentParser(description="Play a policy in WheeledLab.")
 ###### DEFINE POLICY TO PLAY ######
 ###################################
 DEFAULT_LOGS_PATH = "/home/tongo/WheeledLab/source/wheeledlab_rl/logs/"
-POLICY = "atomic-sponge-1344" 
+POLICY = "20250820_1336run" 
 SAVE_NAME = 'test'
 SAVE_DIR = '/home/tongo/WheeledLab/source/wheeledlab_rl/logs_play_policy'
 TIMESTAMP = datetime.now().strftime("%m%d_%H%M")
