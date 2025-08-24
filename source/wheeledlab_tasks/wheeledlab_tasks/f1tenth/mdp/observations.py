@@ -164,6 +164,11 @@ def deviation_centerline_horizon(
         env._map_levels = torch.zeros(env.num_envs, 
                                 dtype=torch.long,
                                 device=env.device)
+    if not hasattr(env, '_waypoints_list'):
+        env._waypoints_list = [
+            torch.tensor(wps, device=env.device, dtype=torch.float32)
+            for wps in env.scene.terrain.cfg.waypoints_list
+        ]
     
     # Get map levels for all environments
     map_levels = env._map_levels  # shape: [num_envs]
@@ -186,11 +191,8 @@ def deviation_centerline_horizon(
         map_vel_x     = vel_x[env_mask]
 
         # Get waypoints for this map level
-        waypoints_xy_world = torch.tensor(
-            env.scene.terrain.cfg.waypoints_list[map_level],
-            device=env.device,
-            dtype=torch.float32
-        )[:, :2]
+        waypoints_xy_world = env._waypoints_list[map_level][:, :2]
+
         
         inner_xy_world = torch.tensor(
             env.scene.terrain.cfg.inner_list[map_level],
@@ -277,6 +279,11 @@ def heading_error_horizon(
         env._map_levels = torch.zeros(env.num_envs, 
                                 dtype=torch.long,
                                 device=env.device)
+    if not hasattr(env, '_waypoints_list'):
+        env._waypoints_list = [
+            torch.tensor(wps, device=env.device, dtype=torch.float32)
+            for wps in env.scene.terrain.cfg.waypoints_list
+        ]
         
     # Get map levels for all environments
     map_levels = env._map_levels  # shape: [num_envs]
@@ -300,11 +307,8 @@ def heading_error_horizon(
         map_headings = heading_w[env_mask]
         
         # Get waypoints for this map level
-        waypoints_xy_world = torch.tensor(
-            env.scene.terrain.cfg.waypoints_list[map_level],
-            device=env.device,
-            dtype=torch.float32
-        )[:, :2]
+        waypoints_xy_world = env._waypoints_list[map_level][:, :2]
+
         
         inner_xy_world = torch.tensor(
             env.scene.terrain.cfg.inner_list[map_level],
@@ -385,6 +389,11 @@ def d_lat_horizon(
         env._map_levels = torch.zeros(env.num_envs, 
                                 dtype=torch.long,
                                 device=env.device)
+    if not hasattr(env, '_waypoints_list'):
+        env._waypoints_list = [
+            torch.tensor(wps, device=env.device, dtype=torch.float32)
+            for wps in env.scene.terrain.cfg.waypoints_list
+        ]
         
     # Get map levels for all environments
     map_levels = env._map_levels  # shape: [num_envs]
@@ -406,11 +415,8 @@ def d_lat_horizon(
         map_positions = pos_xy_world[env_mask]
         map_vel_x     = vel_x[env_mask]
         # Get waypoints and track bounds for this map level
-        waypoints_xy_world = torch.tensor(
-            env.scene.terrain.cfg.waypoints_list[map_level],
-            device=env.device,
-            dtype=torch.float32
-        )[:, :2]
+        waypoints_xy_world = env._waypoints_list[map_level][:, :2]
+
         
         inner_xy_world = torch.tensor(
             env.scene.terrain.cfg.inner_list[map_level],
@@ -488,6 +494,11 @@ def kappa_radpm_horizon(
         env._map_levels = torch.zeros(env.num_envs, 
                                 dtype=torch.long,
                                 device=env.device)
+    if not hasattr(env, '_waypoints_list'):
+        env._waypoints_list = [
+            torch.tensor(wps, device=env.device, dtype=torch.float32)
+            for wps in env.scene.terrain.cfg.waypoints_list
+        ]
         
     # Get map levels for all environments
     map_levels = env._map_levels  # shape: [num_envs]
@@ -510,11 +521,8 @@ def kappa_radpm_horizon(
         map_vel_x     = vel_x[env_mask]
 
         # Get waypoints and track data for this map level
-        waypoints_xy_world = torch.tensor(
-            env.scene.terrain.cfg.waypoints_list[map_level],
-            device=env.device,
-            dtype=torch.float32
-        )[:, :2]
+        waypoints_xy_world = env._waypoints_list[map_level][:, :2]
+
         
         inner_xy_world = torch.tensor(
             env.scene.terrain.cfg.inner_list[map_level],
@@ -592,6 +600,11 @@ def delta_psi_rad_horizon(
         env._map_levels = torch.zeros(env.num_envs, 
                                 dtype=torch.long,
                                 device=env.device)
+    if not hasattr(env, '_waypoints_list'):
+        env._waypoints_list = [
+            torch.tensor(wps, device=env.device, dtype=torch.float32)
+            for wps in env.scene.terrain.cfg.waypoints_list
+        ]
         
     # Get map levels for all environments
     map_levels = env._map_levels  # shape: [num_envs]
@@ -613,11 +626,8 @@ def delta_psi_rad_horizon(
         map_positions = pos_xy_world[env_mask]
         map_vel_x     = vel_x[env_mask]
         # Get waypoints and track data for this map level
-        waypoints_xy_world = torch.tensor(
-            env.scene.terrain.cfg.waypoints_list[map_level],
-            device=env.device,
-            dtype=torch.float32
-        )[:, :2]
+        waypoints_xy_world = env._waypoints_list[map_level][:, :2]
+
         
         inner_xy_world = torch.tensor(
             env.scene.terrain.cfg.inner_list[map_level],
@@ -664,7 +674,7 @@ def delta_psi_rad_horizon(
 
     return delta_psi_rad
 
-def opponent_frenet_info(
+def opponent_info(
     env: ManagerBasedEnv, 
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     opponent_cfg: SceneEntityCfg = SceneEntityCfg("opponent")
@@ -688,14 +698,24 @@ def opponent_frenet_info(
             dtype=torch.float32,
             device=env.device
         )
-       
-    opp_vel_x = env._opponent_speed
-
+    if not hasattr(env, '_opponent_heading'):
+       env._opponent_heading = torch.zeros(
+            env.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+        )       
+    opp_vel_x   = env._opponent_speed
+    opp_heading = env._opponent_heading
 
     if not hasattr(env, '_map_levels'):
         env._map_levels = torch.zeros(env.num_envs, 
                                 dtype=torch.long,
                                 device=env.device)
+    if not hasattr(env, '_waypoints_list'):
+        env._waypoints_list = [
+            torch.tensor(wps, device=env.device, dtype=torch.float32)
+            for wps in env.scene.terrain.cfg.waypoints_list
+        ]
         
     # Get map levels for all environments
     map_levels = env._map_levels  # shape: [num_envs]
@@ -711,6 +731,8 @@ def opponent_frenet_info(
     is_behind             = torch.zeros(num_envs, device = env.device, dtype=torch.long)
 
     vx_diff_opp_ego       = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
+    opp_ego_heading_diff       = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
+
     # Process each map level separately
 
     # num_episodes = env.common_step_counter // env.max_episode_length
@@ -727,17 +749,15 @@ def opponent_frenet_info(
             
         # Get positions for these environments
         ego_map_positions = ego_pos_xy_world[env_mask]
-        ego_map_headings =  ego_heading_w[env_mask]
-        ego_map_vel_x = ego_vel_x[env_mask]
+        ego_map_headings  = ego_heading_w[env_mask]
+        ego_map_vel_x     = ego_vel_x[env_mask]
         opp_map_positions = opp_pos_xy_world[env_mask]
-        opp_map_vel_x = opp_vel_x[env_mask]
-
+        opp_map_vel_x     = opp_vel_x[env_mask]
+        opp_map_headings  = opp_heading[env_mask]
+        
         # Get waypoints and track data for this map level
-        waypoints_xy_world = torch.tensor(
-            env.scene.terrain.cfg.waypoints_list[map_level],
-            device=env.device,
-            dtype=torch.float32
-        )[:, :2]
+        waypoints_xy_world = env._waypoints_list[map_level][:, :2]
+
         
         # FRENET DISTANCES
         num_waypoints = len(waypoints_xy_world)
@@ -755,7 +775,7 @@ def opponent_frenet_info(
         dist = torch.norm(ego_map_positions - opp_map_positions, p=2, dim=1)
         ego_opp_vec = (opp_map_positions - ego_map_positions)
         ego_opp_positioning_vec = (ego_map_heading_vec[:, 0] * ego_opp_vec[:, 1] 
-                                - ego_map_heading_vec[:, 1] * ego_opp_vec[:, 0]) / (dist + 1e-6)
+                                - ego_map_heading_vec[:, 1] * ego_opp_vec[:, 0]) / (dist + 1e-1)
         ego_opp_positioning_vec_norm = torch.clamp(ego_opp_positioning_vec, -1.0, 1.0)
 
         
@@ -771,7 +791,14 @@ def opponent_frenet_info(
         time_to_collision[env_mask] = torch.clamp(s_idx_diff_opp_ego[env_mask]/(-vx_diff_opp_ego[env_mask]+0.001), 0, 10)
         t_diff_opp_ego[env_mask] = torch.clamp(t_diff_opp_ego[env_mask], -10.0, 10.0)  
 
-    return torch.stack([s_idx_diff_opp_ego, d_diff_opp_ego, vx_diff_opp_ego, time_to_collision, cross_pos_opp_ego],dim=1)
+        # HEADING
+        # Calculate smallest angle differences 
+        opp_ego_heading_diff[env_mask] = torch.atan2(
+            torch.sin(opp_map_headings - ego_map_headings),
+            torch.cos(opp_map_headings - ego_map_headings)
+        )
+        
+    return torch.stack([s_idx_diff_opp_ego, d_diff_opp_ego, vx_diff_opp_ego, time_to_collision, cross_pos_opp_ego, opp_ego_heading_diff],dim=1)
 
 def gaps_info(
     env: ManagerBasedEnv, 
@@ -789,6 +816,11 @@ def gaps_info(
         env._map_levels = torch.zeros(env.num_envs, 
                                 dtype=torch.long,
                                 device=env.device)
+    if not hasattr(env, '_waypoints_list'):
+        env._waypoints_list = [
+            torch.tensor(wps, device=env.device, dtype=torch.float32)
+            for wps in env.scene.terrain.cfg.waypoints_list
+        ]
         
     # Get map levels for all environments
     map_levels = env._map_levels  # shape: [num_envs]
@@ -823,11 +855,8 @@ def gaps_info(
         opp_map_positions = opp_pos_xy_world[env_mask]
 
         # Get waypoints and track data for this map level
-        waypoints_xy_world = torch.tensor(
-            env.scene.terrain.cfg.waypoints_list[map_level],
-            device=env.device,
-            dtype=torch.float32
-        )[:, :2]
+        waypoints_xy_world = env._waypoints_list[map_level][:, :2]
+
 
         inner_xy_world = torch.tensor(
             env.scene.terrain.cfg.inner_list[map_level],

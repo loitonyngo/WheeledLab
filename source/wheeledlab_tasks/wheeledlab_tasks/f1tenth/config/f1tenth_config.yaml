@@ -1,16 +1,19 @@
 # config.yaml
 env_config:
-  MAP_NAME_LIST: ['BRA']
+  MAP_NAME_LIST: ['JED']
   ORIGIN_LIST: [[0, 0], [0, 0], [0, 0], [0, 0]]
 
   # When comparing real data that don't use incremental it must always be set to False
   INCREMENTAL_MODE: True
-  MAX_SPEED_INCREMENT: 0.14
-
+  MAX_SPEED_INCREMENT: 0.13
+  MAX_SPEED_SCALING: 8
+  MAX_STEERING_SCALING: 0.42
+  SPEED_OFFSET: 0
+  STEERING_OFFSET: 0.0
   VD_ENHANCED: False
 
-  DYNAMIC_FRICTION: 0.70
-  STATIC_FRICTION: 0.70
+  DYNAMIC_FRICTION: 0.75
+  STATIC_FRICTION: 0.75
   RESTITUTION: 0.0
 
   CONSTANT_SPEED: False
@@ -19,22 +22,16 @@ env_config:
   # usually both true
   NON_TRAVERSABLE_TERMINATION: True
   RESET_RANDOM: True
-  
-  MAX_SPEED_SCALING: 8
-  MAX_STEERING_SCALING: 0.42
-  SPEED_OFFSET: 0
-  STEERING_OFFSET: 0.0
-
-  PLAY_POLICY: True
+  PLAY_POLICY: False
 
   # SIM_DT: Physics simulation time step
   # SIM_DECIMATION: Number of physics steps per simulation step; 
   # The actions, observations, and rewards are computed every SIM_DECIMATION steps, and every SIM_DECIMATION*SIM_DT seconds.
-  EPISODE_LENGTH_S: 20
+  EPISODE_LENGTH_S: 10
   SIM_DT: 0.00625
   SIM_DECIMATION: 8
-  # SIM_DT: 0.025
-  # SIM_DECIMATION: 1
+  # SIM_DT: 0.01
+  # SIM_DECIMATION: 8
 
   LEN_S_IDX: 0.1 
   # SIM_DT: 0.003125
@@ -43,6 +40,10 @@ env_config:
   MAX_DELAY_STEERING: 24
   MIN_DELAY_THROTTLE: 8 #sim dt steps
   MAX_DELAY_THROTTLE: 8
+  # MIN_DELAY_STEERING: 0 #sim dt steps
+  # MAX_DELAY_STEERING: 0
+  # MIN_DELAY_THROTTLE: 0 #sim dt steps
+  # MAX_DELAY_THROTTLE: 0
 
   # PROGRESS_HISTORY_LENGTH: Number of last waypoints to store in the history buffer, every every SIM_DECIMATION*SIM_DT seconds.
   # PROGRESS_HISTORY_CHECKPOINT_IDX: Index of the last checkpoint in the history buffer used to compute the difference in progress
@@ -64,11 +65,13 @@ env_config:
   DELTA_S_IDX: 10
   N_HORIZON: 20
 
-  OPP_SIZE_RADIUS: 0.18
-  OPP_MOVE_DT: 0.1
-  OPP_COLLISION_RADIUS: 0.36
-  OPPONENT_INIT_DISTANCE_IDX: 10
-  OPPONENT_FAR_AWAY_IDX: 75
-  OPPONENT_OVERTAKEN_IDX: 75
+  OPP_SIZE_RADIUS: 0.16
+  OPP_MOVE_DT: 0.05
+  OPP_COLLISION_RADIUS: 0.34
+  OPP_VEL_SCALING: 0.5 # (vel scaling = 0.2 + OPP_VEL_SCALING)
+  OPP_MIN_VEL_SCALING: 0.2
+  OPPONENT_INIT_DISTANCE_IDX: 15
+  OPPONENT_FAR_AWAY_IDX: 40
+  OPPONENT_OVERTAKEN_IDX: 5
   IGNORE_OPPONENT_UNTIL_EP: 0
   STATIC_OPPONENT_UNTIL_EP: 0

@@ -331,63 +331,6 @@ class F1TenthTimeTrialEventsCfg:
             func=reset_root_state_start_idx,
             mode="reset",
         )
-
-    # if CONFIG['env_config']['VD_ENHANCED']:
-    #     enhanced_braking = EventTerm(
-    #         func=mdp.enhanced_braking,
-    #         params={'k_p': 1,
-    #                 'k_d': 0.2,
-    #                 'min_speed_correction': -0.75},
-    #         mode="interval",
-    #         interval_range_s=(0.05, 0.05)
-            
-    #     )
-
-    #     enhanced_tc = EventTerm(
-    #         func=mdp.enhanced_tc,
-    #         params={'k_p': 1,
-    #                 'k_d': 0.1,
-    #                 'k_i': 0.0,
-    #                 'max_speed_correction': +0.40,
-    #                 'tc_coefficient': 0.5},
-    #         mode="interval",
-    #         interval_range_s=(0.05, 0.05) 
-    #     )
-
-    #     enhanced_rotation = EventTerm(
-    #         func=mdp.enhanced_rotation,
-    #         params={'k_p': 0.1,
-    #                 'k_d': 0.25,
-    #                 'k_i': 0.3
-    #                 },
-    #         mode="interval",
-    #         interval_range_s=(0.05, 0.05)
-    #     )
-
-    # enhanced_vy = EventTerm(
-    #     func=mdp.enhanced_vy,
-    #     params={'k_p': 0.5,
-    #             'k_d': 0.5,
-    #             'k_i': 0
-    #             },
-    #     mode="interval",
-    #     interval_range_s=(0.025, 0.025)
-    # )
-
-    # store_data = EventTerm( 
-    #     func= store_data,
-    #     mode="interval",
-    #     interval_range_s=(0.025, 0.025),
-    #     params={
-    #     },
-    # )
-
-    # def update_history_buffer(
-    #     env: ManagerBasedEnv,
-    #     env_ids: torch.Tensor,
-    #     # valid_posns_and_rots: dict[str, tuple[float, float]],
-    #     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    # ):
         
 
 @configclass
@@ -844,7 +787,13 @@ class F1TenthTimeTrialEnv(ManagerBasedEnv):
             dtype=torch.long,
             device=self.device
         )
-
+        
+        self._wall_collision_history = torch.zeros(
+            (self.num_envs, self._rew_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.long,
+            device=self.device
+        )
+        
         # Bool to determine if the car has just reset; it is set to True when a new pose is generated, and afterwards immediately set to false 
         self._reset_env_bool = torch.zeros(  # Tracks where to insert the next index
             self.num_envs,
@@ -882,6 +831,111 @@ class F1TenthTimeTrialEnv(ManagerBasedEnv):
             dtype=torch.float32,
             device=self.device
         )
+
+        self._opponent_type = torch.zeros(
+            self.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.long,
+            device=self.device
+        )
+        
+        self._opponent_vel_scaling = torch.ones(
+            self.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float16,
+            device=self.device
+        )
+
+        self._opponent_trajectory_alpha = torch.ones(
+            self.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float16,
+            device=self.device
+        )
+
+        self._opponent_overtaken_bool = torch.zeros(
+            self.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.bool,
+            device=self.device
+        )
+
+        self._opponent_speed = torch.zeros(
+            self.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=self.device
+        )
+
+        self._opponent_d_dot = torch.zeros(
+            self.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=self.device
+        )
+        
+        self._opponent_heading = torch.zeros(
+            self.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=self.device
+        )
+        
+        self._opponent_always_ahead = torch.zeros(
+            self.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.bool,
+            device=self.device
+        )
+
+        self._opponent_collision_history = torch.zeros(
+            (self.num_envs, self._rew_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.long,
+            device=self.device
+        )
+
+        self._waypoints_list = [
+            torch.tensor(wps, device=self.device, dtype=torch.float32)
+            for wps in cfg.waypoints_list
+        ]
+
+        self._outer_list = [
+            torch.tensor(outer, device=self.device, dtype=torch.float32)
+            for outer in cfg.outer_list
+        ]
+
+        self._inner_list = [
+            torch.tensor(inner, device=self.device, dtype=torch.float32)
+            for inner in cfg.inner_list
+        ]
+
+        self._d_lat_list = [
+            torch.tensor(d_lat, device=self.device, dtype=torch.float32)
+            for d_lat in cfg.d_lat_list
+        ]
+
+        self._psi_rad_list = [
+            torch.tensor(psi, device=self.device, dtype=torch.float32)
+            for psi in cfg.psi_rad_list
+        ]
+
+        self._kappa_radpm_list = [
+            torch.tensor(kappa, device=self.device, dtype=torch.float32)
+            for kappa in cfg.kappa_radpm_list
+        ]
+
+        self._vx_mps_list = [
+            torch.tensor(vx, device=self.device, dtype=torch.float32)
+            for vx in cfg.vx_mps_list
+        ]
+
+        self._opp_traj_center_list = [
+            torch.tensor(center, device=self.device, dtype=torch.float32)
+            for center in cfg.opp_traj_center_list
+        ]
+
+        self._opp_traj_iqp_list = [
+            torch.tensor(iqp, device=self.device, dtype=torch.float32)
+            for iqp in cfg.opp_traj_iqp_list
+        ]
+
+        self._opp_traj_sp_list = [
+            torch.tensor(sp, device=self.device, dtype=torch.float32)
+            for sp in cfg.opp_traj_sp_list
+        ]
+
         
 @configclass
 class F1TenthTimeTrialRLRandomEnvCfg(F1TenthTimeTrialRLEnvCfg):

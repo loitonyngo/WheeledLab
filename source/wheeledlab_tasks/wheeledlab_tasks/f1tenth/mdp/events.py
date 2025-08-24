@@ -107,9 +107,9 @@ def reset_root_state_random(
             device=env.device
         )
 
-    if not hasattr(env, '_traversability_history'):
+    if not hasattr(env, '_wall_collision_history'):
         env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
-        env._traversability_history = torch.ones(
+        env._wall_collision_history = torch.ones(
             (env.num_envs, env._rew_history_length), 
             dtype=torch.long,
             device=env.device
@@ -134,7 +134,7 @@ def reset_root_state_random(
     env._base_ang_vel_z_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
     env._target_velocity_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
 
-    env._traversability_history[env_ids, :] = torch.ones((len(env_ids), env._rew_history_length), dtype=torch.long, device=env.device)
+    env._wall_collision_history[env_ids, :] = torch.zeros((len(env_ids), env._rew_history_length), dtype=torch.long, device=env.device)
 
 def reset_root_state_random_with_opponent(
     env: ManagerBasedEnv,
@@ -148,6 +148,8 @@ def reset_root_state_random_with_opponent(
     opponent_asset: RigidObject | Articulation = env.scene[opponent_asset_cfg.name]
 
     terrain: TerrainImporter = env.scene.terrain
+
+    num_episodes = env.common_step_counter // env.max_episode_length
 
     if not hasattr(env, '_map_levels'):
         env._map_levels = torch.zeros(env.num_envs, 
@@ -311,6 +313,13 @@ def reset_root_state_random_with_opponent(
             device=env.device
         )        
 
+    if not hasattr(env, '_opponent_trajectory_alpha'):
+        env._opponent_trajectory_alpha = torch.ones(
+            env.num_envs, 
+            dtype=torch.float16,
+            device=env.device
+        )        
+
     if not hasattr(env, '_opponent_overtaken_bool'):
        env._opponent_overtaken_bool = torch.zeros(
             env.num_envs,  # Shape: (num_envs, history_length, n_actions)
@@ -338,13 +347,56 @@ def reset_root_state_random_with_opponent(
             dtype=torch.float32,
             device=env.device
         )
-         
+
+    if not hasattr(env, '_opponent_always_ahead'):
+        env._opponent_always_ahead = torch.zeros(
+            env.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.bool,
+            device=env.device
+        )
+
+    if not hasattr(env, '_opponent_collision_history'):
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
+        env._opponent_collision_history = torch.zeros(
+            (env.num_envs, env._rew_history_length), 
+            dtype=torch.long,
+            device=env.device
+        )
+        
     env._opponent_type[env_ids]           = torch.tensor(np.floor(np.random.rand(len(env_ids))*3), device = env.device, dtype=torch.long)
-    env._opponent_vel_scaling[env_ids]    = torch.tensor(np.random.rand(len(env_ids)), device = env.device, dtype=torch.float16)
+    
+    if num_episodes < 50:
+        min_vel_scaling = CONFIG['env_config']['OPP_MIN_VEL_SCALING']
+        max_vel_scaling = CONFIG['env_config']['OPP_MIN_VEL_SCALING'] + 0.1
+    elif num_episodes < 100:
+        min_vel_scaling = CONFIG['env_config']['OPP_MIN_VEL_SCALING']
+        max_vel_scaling = CONFIG['env_config']['OPP_MIN_VEL_SCALING'] + 0.2
+    elif num_episodes < 150:
+        min_vel_scaling = CONFIG['env_config']['OPP_MIN_VEL_SCALING']
+        max_vel_scaling = CONFIG['env_config']['OPP_MIN_VEL_SCALING'] + 0.3
+    elif num_episodes < 200:
+        min_vel_scaling = CONFIG['env_config']['OPP_MIN_VEL_SCALING']
+        max_vel_scaling = CONFIG['env_config']['OPP_MIN_VEL_SCALING'] + 0.5
+    elif num_episodes < 250:
+        min_vel_scaling = CONFIG['env_config']['OPP_MIN_VEL_SCALING']
+        max_vel_scaling = CONFIG['env_config']['OPP_MIN_VEL_SCALING'] + 0.6
+    else:
+        min_vel_scaling = CONFIG['env_config']['OPP_MIN_VEL_SCALING']
+        max_vel_scaling = 1     
+        
+    env._opponent_vel_scaling[env_ids]    = torch.tensor(np.random.rand(len(env_ids))*max_vel_scaling, device = env.device, dtype=torch.float16).clamp(min=min_vel_scaling)
+    env._opponent_trajectory_alpha[env_ids]    = torch.tensor(np.random.rand(len(env_ids)), device = env.device, dtype=torch.float16)
+    # env._opponent_trajectory_alpha[env_ids]    = torch.ones(len(env_ids), dtype=torch.float16, device=env.device)
+
     env._opponent_overtaken_bool[env_ids] = torch.zeros(len(env_ids), dtype=bool, device=env.device)
     env._opponent_speed[env_ids]          = torch.zeros(len(env_ids), dtype=torch.float32, device=env.device)
     env._opponent_d_dot[env_ids]          = torch.zeros(len(env_ids), dtype=torch.float32, device=env.device)
     env._opponent_heading[env_ids]        = torch.zeros(len(env_ids), dtype=torch.float32, device=env.device)
+    
+    random_val = torch.rand(len(env_ids), device=env.device)
+    env._opponent_always_ahead[env_ids]   = random_val < 0.1
+
+    env._opponent_collision_history[env_ids, :] = torch.zeros((len(env_ids), env._rew_history_length), dtype=torch.long, device=env.device)
 
 # def reset_root_state_random_opponent(
 #     env: ManagerBasedEnv,
@@ -517,126 +569,288 @@ def reset_root_state_start_idx(
 
     env._traversability_history[env_ids, :] = torch.ones((len(env_ids), env._rew_history_length), dtype=torch.long, device=env.device)
 
-def move_opponent_vel_based(
-    env: ManagerBasedEnv,
-    env_ids: torch.Tensor,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("opponent")
-):
-    num_episodes = env.common_step_counter // env.max_episode_length
-    if num_episodes < CONFIG['env_config']['STATIC_OPPONENT_UNTIL_EP']:
-        return None
+# def move_opponent_vel_based(
+#     env: ManagerBasedEnv,
+#     env_ids: torch.Tensor,
+#     asset_cfg: SceneEntityCfg = SceneEntityCfg("opponent")
+# ):
+#     num_episodes = env.common_step_counter // env.max_episode_length
+#     if num_episodes < CONFIG['env_config']['STATIC_OPPONENT_UNTIL_EP']:
+#         return None
     
-    # Initialize attributes if they don't exist
-    if not hasattr(env, '_opponent_type'):
-        env._opponent_type = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
-    if not hasattr(env, '_opponent_vel_scaling'):
-        env._opponent_vel_scaling = torch.ones(env.num_envs, dtype=torch.float16, device=env.device)
-    if not hasattr(env, '_map_levels'):
-        env._map_levels = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+#     # Initialize attributes if they don't exist
+#     if not hasattr(env, '_opponent_type'):
+#         env._opponent_type = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+#     if not hasattr(env, '_opponent_vel_scaling'):
+#         env._opponent_vel_scaling = torch.ones(env.num_envs, dtype=torch.float16, device=env.device)
+#     if not hasattr(env, '_map_levels'):
+#         env._map_levels = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
     
-    asset = env.scene[asset_cfg.name]
-    opp_position_xy = mdp.root_pos_w(env=env, asset_cfg=SceneEntityCfg("opponent"))[:, :2]
+#     asset = env.scene[asset_cfg.name]
+#     opp_position_xy = mdp.root_pos_w(env=env, asset_cfg=SceneEntityCfg("opponent"))[:, :2]
     
-    # Initialize velocity tensors
-    new_position = torch.zeros_like(opp_position_xy)
-    new_lin_velocities = torch.zeros_like(asset.data.root_lin_vel_w)
-    new_ang_velocities = torch.zeros_like(asset.data.root_ang_vel_w)
+#     # Initialize velocity tensors
+#     new_position = torch.zeros_like(opp_position_xy)
+#     new_lin_velocities = torch.zeros_like(asset.data.root_lin_vel_w)
+#     new_ang_velocities = torch.zeros_like(asset.data.root_ang_vel_w)
     
-    # Get opponent types and map levels for current env_ids
-    opponent_types = env._opponent_type
-    map_levels = env._map_levels
-    unique_map_levels = torch.unique(map_levels)
+#     # Get opponent types and map levels for current env_ids
+#     opponent_types = env._opponent_type
+#     map_levels = env._map_levels
+#     unique_map_levels = torch.unique(map_levels)
     
-    for map_level in unique_map_levels:
-        # Mask for environments in this map level
-        map_mask = (map_levels == map_level)
-        if not map_mask.any():
-            continue
+#     for map_level in unique_map_levels:
+#         # Mask for environments in this map level
+#         map_mask = (map_levels == map_level)
+#         if not map_mask.any():
+#             continue
             
-        # Get all positions for this map level at once
-        current_positions = opp_position_xy[env_ids[map_mask]]
+#         # Get all positions for this map level at once
+#         current_positions = opp_position_xy[env_ids[map_mask]]
         
-        # Get opponent types for this map level
-        level_opp_types = opponent_types[map_mask]
+#         # Get opponent types for this map level
+#         level_opp_types = opponent_types[map_mask]
         
-        # Process each opponent type in this map level
-        for opp_type in torch.unique(level_opp_types):
-            type_mask = (level_opp_types == opp_type)
-            if not type_mask.any():
-                continue
+#         # Process each opponent type in this map level
+#         for opp_type in torch.unique(level_opp_types):
+#             type_mask = (level_opp_types == opp_type)
+#             if not type_mask.any():
+#                 continue
                 
-            # Select the appropriate trajectory
-            if opp_type == 0:  # Center
-                waypoints = torch.tensor(
-                    env.scene.terrain.cfg.opp_traj_center_list[map_level], 
-                    device=env.device
-                )
-            elif opp_type == 1:  # IQP
-                waypoints = torch.tensor(
-                    env.scene.terrain.cfg.opp_traj_iqp_list[map_level], 
-                    device=env.device
-                )
-            elif opp_type == 2:  # SP
-                waypoints = torch.tensor(
-                    env.scene.terrain.cfg.opp_traj_sp_list[map_level], 
-                    device=env.device
-                )
-            else:
-                raise ValueError(f"Unknown opponent type: {opp_type}")
+#             # Select the appropriate trajectory
+#             if opp_type == 0:  # Center
+#                 waypoints = torch.tensor(
+#                     env.scene.terrain.cfg.opp_traj_center_list[map_level], 
+#                     device=env.device
+#                 )
+#             elif opp_type == 1:  # IQP
+#                 waypoints = torch.tensor(
+#                     env.scene.terrain.cfg.opp_traj_iqp_list[map_level], 
+#                     device=env.device
+#                 )
+#             elif opp_type == 2:  # SP
+#                 waypoints = torch.tensor(
+#                     env.scene.terrain.cfg.opp_traj_sp_list[map_level], 
+#                     device=env.device
+#                 )
+#             else:
+#                 raise ValueError(f"Unknown opponent type: {opp_type}")
             
-            # Extract waypoint components
-            waypoints_xy = waypoints[:, :2]
-            waypoints_vel_x = waypoints[:, 3]
+#             # Extract waypoint components
+#             waypoints_xy = waypoints[:, :2]
+#             waypoints_vel_x = waypoints[:, 3]
             
-            # Find closest waypoints for all relevant environments at once
-            current_indices, _ = find_frenet_coord_along_waypoints(
-                waypoints_xy, 
-                current_positions[type_mask]
-            )
+#             # Find closest waypoints for all relevant environments at once
+#             current_indices, _ = find_frenet_coord_along_waypoints(
+#                 waypoints_xy, 
+#                 current_positions[type_mask]
+#             )
             
-            # Calculate lookahead indices (wrap around if needed)
-            lookahead_indices = (current_indices + 5) % len(waypoints_xy)
+#             # Calculate lookahead indices (wrap around if needed)
+#             lookahead_indices = (current_indices + 5) % len(waypoints_xy)
             
-            # Get current and lookahead positions
-            current_wp_pos = waypoints_xy[current_indices]
-            lookahead_wp_pos = waypoints_xy[lookahead_indices]
+#             # Get current and lookahead positions
+#             current_wp_pos = waypoints_xy[current_indices]
+#             lookahead_wp_pos = waypoints_xy[lookahead_indices]
             
-            # Calculate direction vectors
-            direction_vectors = lookahead_wp_pos - current_wp_pos
+#             # Calculate direction vectors
+#             direction_vectors = lookahead_wp_pos - current_wp_pos
             
-            # Calculate yaw using atan2 (y, x)
-            target_yaws = torch.atan2(direction_vectors[:, 1], direction_vectors[:, 0])
+#             # Calculate yaw using atan2 (y, x)
+#             target_yaws = torch.atan2(direction_vectors[:, 1], direction_vectors[:, 0])
 
-            # if num_episodes < 25:
-            #     vel_multiplier = 0.4
-            # elif num_episodes < 50:
-            vel_multiplier = 0.8 + 0.1*np.random.rand() - 0.1*np.random.rand()
+#             # if num_episodes < 25:
+#             #     vel_multiplier = 0.4
+#             # elif num_episodes < 50:
+#             vel_multiplier = 0.8 + 0.1*np.random.rand() - 0.1*np.random.rand()
                 
-            # Get target velocities
-            # target_vels = waypoints_vel_x[current_indices] * env._opponent_vel_scaling[env_ids[map_mask][type_mask]] * vel_multiplier
+#             # Get target velocities
+#             # target_vels = waypoints_vel_x[current_indices] * env._opponent_vel_scaling[env_ids[map_mask][type_mask]] * vel_multiplier
             
-            if num_episodes % 25:
-                vel_multiplier += 0.05
+#             if num_episodes % 25:
+#                 vel_multiplier += 0.05
             
-            target_vels = waypoints_vel_x[current_indices] * 0.55
+#             target_vels = waypoints_vel_x[current_indices] * 0.55
 
-            # Convert to world frame velocities
-            cos_yaws = torch.cos(target_yaws)
-            sin_yaws = torch.sin(target_yaws)
+#             # Convert to world frame velocities
+#             cos_yaws = torch.cos(target_yaws)
+#             sin_yaws = torch.sin(target_yaws)
             
-            # Get the actual env_ids we're processing
-            processing_ids = env_ids[map_mask][type_mask]
+#             # Get the actual env_ids we're processing
+#             processing_ids = env_ids[map_mask][type_mask]
             
-            # Set velocities
-            new_lin_velocities[processing_ids, 0] = target_vels * cos_yaws
-            new_lin_velocities[processing_ids, 1] = target_vels * sin_yaws
-            new_lin_velocities[processing_ids, 2] = 0
+#             # Set velocities
+#             new_lin_velocities[processing_ids, 0] = target_vels * cos_yaws
+#             new_lin_velocities[processing_ids, 1] = target_vels * sin_yaws
+#             new_lin_velocities[processing_ids, 2] = 0
     
-    # Write velocities to sim
-    asset.write_root_velocity_to_sim(
-        torch.cat([new_lin_velocities, new_ang_velocities], dim=1),
-        env_ids=env_ids
-    )
+#     # Write velocities to sim
+#     asset.write_root_velocity_to_sim(
+#         torch.cat([new_lin_velocities, new_ang_velocities], dim=1),
+#         env_ids=env_ids
+#     )
+
+# def move_opponent_s_based(
+#     env: ManagerBasedEnv,
+#     env_ids: torch.Tensor,
+#     asset_cfg: SceneEntityCfg = SceneEntityCfg("opponent")
+# ):
+#     num_episodes = env.common_step_counter // env.max_episode_length
+#     if num_episodes < CONFIG['env_config']['STATIC_OPPONENT_UNTIL_EP']:
+#         return None
+    
+#     # Initialize attributes if they don't exist
+#     if not hasattr(env, '_opponent_type'):
+#         env._opponent_type = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+#     if not hasattr(env, '_opponent_vel_scaling'):
+#         env._opponent_vel_scaling = torch.ones(env.num_envs, dtype=torch.float16, device=env.device)
+#     if not hasattr(env, '_opponent_trajectory_alpha'):
+#         env._opponent_trajectory_alpha = torch.ones(env.num_envs, dtype=torch.float16, device=env.device)
+#     if not hasattr(env, '_map_levels'):
+#         env._map_levels = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+    
+#     asset = env.scene[asset_cfg.name]
+#     ego_position_xy = mdp.root_pos_w(env=env, asset_cfg=SceneEntityCfg("robot"))[:, :2]
+#     opp_position_xy = mdp.root_pos_w(env=env, asset_cfg=SceneEntityCfg("opponent"))[:, :2]
+    
+#     # Initialize new positions (preserve Z)
+#     new_positions = asset.data.root_pos_w.clone()
+#     new_orientations = asset.data.root_quat_w.clone()
+#     new_lin_velocities = torch.zeros_like(asset.data.root_lin_vel_w)
+#     new_ang_velocities = torch.zeros_like(asset.data.root_ang_vel_w)
+    
+#     # Get opponent types and map levels for the given env_ids
+#     opponent_types = env._opponent_type[env_ids]
+#     map_levels = env._map_levels[env_ids]
+#     unique_map_levels = torch.unique(map_levels)
+    
+#     for map_level in unique_map_levels:
+#         # Mask for environments in this map level (relative to env_ids)
+#         map_mask = (map_levels == map_level)
+        
+#         if not map_mask.any():
+#             continue
+        
+#         waypoints_xy_world = torch.tensor(
+#             env.scene.terrain.cfg.waypoints_list[map_level],
+#             device=env.device,
+#             dtype=torch.float32
+#         )[:, :2]
+        
+#         # Get opponent types for this map level
+#         level_opp_types = opponent_types[map_mask]
+#         unique_opp_types = torch.unique(level_opp_types)
+        
+#         for opp_type in unique_opp_types:
+#             # Mask for environments with this opponent type (relative to map_mask)
+#             type_mask = (level_opp_types == opp_type)            
+#             if not type_mask.any():
+#                 continue
+#             combined_mask = map_mask & (opponent_types == opp_type)
+
+#             # Select the appropriate trajectory
+#             if opp_type == 0:  # Center
+#                 opp_traj_main = torch.tensor(
+#                     env.scene.terrain.cfg.opp_traj_iqp_list[map_level], 
+#                     device=env.device
+#                 )
+#                 opp_traj_res = torch.tensor(
+#                     env.scene.terrain.cfg.opp_traj_iqp_list[map_level], 
+#                     device=env.device
+#                 )                
+#             elif opp_type == 1:  # IQP
+#                 opp_traj_main = torch.tensor(
+#                     env.scene.terrain.cfg.opp_traj_iqp_list[map_level], 
+#                     device=env.device
+#                 )
+#                 opp_traj_res = torch.tensor(
+#                     env.scene.terrain.cfg.opp_traj_iqp_list[map_level], 
+#                     device=env.device
+#                 )                
+#             elif opp_type == 2:  # SP
+#                 opp_traj_main = torch.tensor(
+#                     env.scene.terrain.cfg.opp_traj_center_list[map_level], 
+#                     device=env.device
+#                 )
+#                 opp_traj_res = torch.tensor(
+#                     env.scene.terrain.cfg.opp_traj_iqp_list[map_level], 
+#                     device=env.device
+#                 )                
+#             else:
+#                 raise ValueError(f"Unknown opponent type: {opp_type}")
+            
+#             # waypoints = torch.tensor(
+#             #         env.scene.terrain.cfg.opp_traj_center_list[map_level], 
+#             #         device=env.device
+#             #     )
+#             opp_traj_main_xy = opp_traj_main[:, :2]
+#             opp_traj_main_psi = opp_traj_main[:, 2]
+#             opp_traj_main_vel_x = opp_traj_main[:, 3]
+            
+#             ego_current_indices, _ = find_frenet_coord_along_waypoints(
+#                 opp_traj_main_xy, 
+#                 ego_position_xy[combined_mask]  # Only positions for current_type_env_ids
+#             )
+            
+#             # Find closest waypoints for all relevant environments at once
+#             opp_current_indices, _ = find_frenet_coord_along_waypoints(
+#                 opp_traj_main_xy, 
+#                 opp_position_xy[combined_mask]  # Only positions for current_type_env_ids
+#             )
+
+#             _, opp_current_d = find_frenet_coord_along_waypoints(
+#                 waypoints_xy_world, 
+#                 opp_position_xy[combined_mask]  # Only positions for current_type_env_ids
+#             )
+            
+#             # Calculate next waypoint indices (with wrapping)
+#             move_steps = (opp_traj_main_vel_x[opp_current_indices] * CONFIG['env_config']['OPP_MOVE_DT'] * (0.4+env._opponent_vel_scaling[combined_mask])/ CONFIG['env_config']['LEN_S_IDX']).int()
+            
+#             # if num_episodes < 25:
+#             # next_indices_traj = (ego_current_indices + CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']) % len(opp_traj_main_xy)
+#             # # else:
+#             # #     # move_steps = 1
+#             # next_indices_traj = (opp_current_indices + move_steps + np.random.randint(low=0, high=2)) % len(opp_traj_main_xy)
+            
+#             next_indices_traj = torch.where(env._opponent_always_ahead[combined_mask],
+#                                             (ego_current_indices + CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']) % len(opp_traj_main_xy),
+#                                             (opp_current_indices + move_steps + np.random.randint(low=0, high=2)) % len(opp_traj_main_xy)
+#             )
+            
+#             # Update positions (X,Y only; preserve Z)
+#             new_positions[combined_mask, 0] = opp_traj_main_xy[next_indices_traj, 0] + env.scene.env_origins[combined_mask, 0] + torch.rand_like(opp_traj_main_xy[next_indices_traj, 0])*0.05
+#             new_positions[combined_mask, 1] = opp_traj_main_xy[next_indices_traj, 1] + env.scene.env_origins[combined_mask, 1] + torch.rand_like(opp_traj_main_xy[next_indices_traj, 1])*0.05
+            
+#             env._opponent_speed[combined_mask] = torch.norm(opp_traj_main_xy[next_indices_traj]-opp_position_xy[combined_mask], p=2, dim=1)/CONFIG['env_config']['OPP_MOVE_DT']
+#             env._opponent_heading[combined_mask]  = torch.atan2(opp_traj_main_xy[next_indices_traj, 1] - opp_position_xy[combined_mask, 1], 
+#                                                 opp_traj_main_xy[next_indices_traj, 0] - opp_position_xy[combined_mask, 0])
+
+#             _, opp_next_d = find_frenet_coord_along_waypoints(
+#                 waypoints_xy_world, 
+#                 opp_traj_main_xy[next_indices_traj]  # Only positions for current_type_env_ids
+#             )
+            
+#             env._opponent_d_dot[combined_mask] = (opp_next_d - opp_current_d)/CONFIG['env_config']['OPP_MOVE_DT']
+            
+#             # Convert yaw (psi) to quaternion for orientation
+            
+#                 #         if opp_type == 0:
+#                 # a = 1
+#             target_yaw = opp_traj_main_psi[opp_current_indices]
+#             new_orientations[combined_mask] = torch.stack([
+#                 torch.ones_like(target_yaw),         # Quaternion w
+#                 torch.zeros_like(target_yaw),        # Quaternion x
+#                 torch.zeros_like(target_yaw),        # Quaternion y
+#                 torch.zeros_like(target_yaw)         # Quaternion z
+#             ], dim=1)
+    
+    
+#     # Apply all updates at once
+#     asset.write_root_pose_to_sim(
+#         torch.cat([new_positions, new_orientations], dim=1), 
+#         env_ids=env_ids
+#     )
+
 
 def move_opponent_s_based(
     env: ManagerBasedEnv,
@@ -652,6 +866,8 @@ def move_opponent_s_based(
         env._opponent_type = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
     if not hasattr(env, '_opponent_vel_scaling'):
         env._opponent_vel_scaling = torch.ones(env.num_envs, dtype=torch.float16, device=env.device)
+    if not hasattr(env, '_opponent_trajectory_alpha'):
+        env._opponent_trajectory_alpha = torch.ones(env.num_envs, dtype=torch.float32, device=env.device)
     if not hasattr(env, '_map_levels'):
         env._map_levels = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
     
@@ -671,9 +887,7 @@ def move_opponent_s_based(
     unique_map_levels = torch.unique(map_levels)
     
     for map_level in unique_map_levels:
-        # Mask for environments in this map level (relative to env_ids)
         map_mask = (map_levels == map_level)
-        
         if not map_mask.any():
             continue
         
@@ -683,95 +897,107 @@ def move_opponent_s_based(
             dtype=torch.float32
         )[:, :2]
         
-        # Get opponent types for this map level
         level_opp_types = opponent_types[map_mask]
         unique_opp_types = torch.unique(level_opp_types)
         
         for opp_type in unique_opp_types:
-            # Mask for environments with this opponent type (relative to map_mask)
-            type_mask = (level_opp_types == opp_type)            
+            type_mask = (level_opp_types == opp_type)
             if not type_mask.any():
                 continue
-                
-            # Select the appropriate trajectory
-            if opp_type == 0:  # Center
-                opp_traj = torch.tensor(
-                    env.scene.terrain.cfg.opp_traj_center_list[map_level], 
-                    device=env.device
-                )
-            elif opp_type == 1:  # IQP
-                opp_traj = torch.tensor(
-                    env.scene.terrain.cfg.opp_traj_iqp_list[map_level], 
-                    device=env.device
-                )
-            elif opp_type == 2:  # SP
-                opp_traj = torch.tensor(
-                    env.scene.terrain.cfg.opp_traj_sp_list[map_level], 
-                    device=env.device
-                )
+            combined_mask = map_mask & (opponent_types == opp_type)
+
+            # Select two base trajectories to blend
+            if opp_type == 0:  # Centerline dominant
+                traj_a = torch.tensor(env.scene.terrain.cfg.opp_traj_center_list[map_level], device=env.device)
+                traj_b = torch.tensor(env.scene.terrain.cfg.opp_traj_iqp_list[map_level], device=env.device)
+            elif opp_type == 1:  # IQP dominant
+                traj_a = torch.tensor(env.scene.terrain.cfg.opp_traj_iqp_list[map_level], device=env.device)
+                traj_b = torch.tensor(env.scene.terrain.cfg.opp_traj_sp_list[map_level], device=env.device)
+            elif opp_type == 2:  # SP dominant
+                traj_a = torch.tensor(env.scene.terrain.cfg.opp_traj_sp_list[map_level], device=env.device)
+                traj_b = torch.tensor(env.scene.terrain.cfg.opp_traj_center_list[map_level], device=env.device)
             else:
                 raise ValueError(f"Unknown opponent type: {opp_type}")
+
+            # Split into components
+            traj_a_xy, traj_a_psi, traj_a_vel = traj_a[:, :2], traj_a[:, 2], traj_a[:, 3]
+            traj_b_xy, traj_b_psi, traj_b_vel = traj_b[:, :2], traj_b[:, 2], traj_b[:, 3]
+
+            # Find closest indices for ego (used to place opponent ahead if needed)
+            ego_idx_a, _ = find_frenet_coord_along_waypoints(traj_a_xy, ego_position_xy[combined_mask])
+            ego_idx_b, _ = find_frenet_coord_along_waypoints(traj_b_xy, ego_position_xy[combined_mask])
+
+            # Find closest indices for opponent
+            opp_idx_a, _ = find_frenet_coord_along_waypoints(traj_a_xy, opp_position_xy[combined_mask])
+            opp_idx_b, _ = find_frenet_coord_along_waypoints(traj_b_xy, opp_position_xy[combined_mask])
+
+            # Compute move steps separately
+            move_steps_a = (traj_a_vel[opp_idx_a] * CONFIG['env_config']['OPP_MOVE_DT'] * 
+                           (env._opponent_vel_scaling[combined_mask])/CONFIG['env_config']['LEN_S_IDX']).int()
+            move_steps_b = (traj_b_vel[opp_idx_b] * CONFIG['env_config']['OPP_MOVE_DT'] * 
+                           (env._opponent_vel_scaling[combined_mask])/CONFIG['env_config']['LEN_S_IDX']).int()
+
+            # Next indices depending on "always ahead"
+            next_idx_a = torch.where(env.episode_length_buf[combined_mask] < 20, 
+                                     opp_idx_a, 
+                                    torch.where(
+                                    env._opponent_always_ahead[combined_mask],
+                                    (ego_idx_a + CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']) % len(traj_a_xy),
+                                    (opp_idx_a + move_steps_a + np.random.randint(low=1, high=2)) % len(traj_a_xy)
+                                    )
+                                     )
             
-            # waypoints = torch.tensor(
-            #         env.scene.terrain.cfg.opp_traj_center_list[map_level], 
-            #         device=env.device
-            #     )
-            opp_traj_xy = opp_traj[:, :2]
-            opp_traj_psi = opp_traj[:, 2]
-            opp_traj_vel_x = opp_traj[:, 3]
-            
-            ego_current_indices, _ = find_frenet_coord_along_waypoints(
-                opp_traj_xy, 
-                ego_position_xy[type_mask]  # Only positions for current_type_env_ids
-            )
-            
-            # Find closest waypoints for all relevant environments at once
-            opp_current_indices, _ = find_frenet_coord_along_waypoints(
-                opp_traj_xy, 
-                opp_position_xy[type_mask]  # Only positions for current_type_env_ids
+
+            next_idx_b = torch.where(env.episode_length_buf[combined_mask] < 20, 
+                                     opp_idx_b, 
+                                    torch.where(
+                                    env._opponent_always_ahead[combined_mask],
+                                    (ego_idx_b + CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']) % len(traj_b_xy),
+                                    (opp_idx_b + move_steps_b + np.random.randint(low=0, high=2)) % len(traj_b_xy)
+                                )
             )
 
-            _, opp_current_d = find_frenet_coord_along_waypoints(
-                waypoints_xy_world, 
-                opp_position_xy[type_mask]  # Only positions for current_type_env_ids
-            )
             
-            # Calculate next waypoint indices (with wrapping)
-            # move_steps = (opp_traj_vel_x[opp_current_indices] * CONFIG['env_config']['OPP_MOVE_DT'] * 0.7 / CONFIG['env_config']['LEN_S_IDX']).int()
+            
+            # Candidate next states
+            pos_a = traj_a_xy[next_idx_a]
+            pos_b = traj_b_xy[next_idx_b]
+            psi_a = traj_a_psi[next_idx_a]
+            psi_b = traj_b_psi[next_idx_b]
+            vel_a = traj_a_vel[next_idx_a]
+            vel_b = traj_b_vel[next_idx_b]
 
-            # if num_episodes < 25:
-            next_indices_traj = (ego_current_indices + CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX'] ) % len(opp_traj_xy)
-            # else:
-            #     # move_steps = 1
-            # next_indices_traj = (opp_current_indices + move_steps + np.random.randint(low=0, high=2)) % len(opp_traj_xy)
-            
+            # Blend with alpha
+            alpha = env._opponent_trajectory_alpha[combined_mask].unsqueeze(-1)
+            blended_pos = alpha * pos_a + (1 - alpha) * pos_b
+
+            heading_a = torch.stack([torch.cos(psi_a), torch.sin(psi_a)], dim=-1)
+            heading_b = torch.stack([torch.cos(psi_b), torch.sin(psi_b)], dim=-1)
+            blended_heading = alpha * heading_a + (1 - alpha) * heading_b
+            blended_psi = torch.atan2(blended_heading[:,1], blended_heading[:,0])
+
+            # blended_vel = (alpha.squeeze() * vel_a + (1 - alpha.squeeze()) * vel_b)
+
             # Update positions (X,Y only; preserve Z)
-            new_positions[type_mask, 0] = opp_traj_xy[next_indices_traj, 0] + env.scene.env_origins[type_mask, 0] + torch.rand_like(opp_traj_xy[next_indices_traj, 0])*0.05
-            new_positions[type_mask, 1] = opp_traj_xy[next_indices_traj, 1] + env.scene.env_origins[type_mask, 1] + torch.rand_like(opp_traj_xy[next_indices_traj, 1])*0.05
-            
-            env._opponent_speed[type_mask] = torch.norm(opp_traj_xy[next_indices_traj]-opp_position_xy[type_mask], p=2, dim=1)/CONFIG['env_config']['OPP_MOVE_DT']
-            # env._opponent_heading = torch.atan2(opp_traj_xy[next_indices_traj, 1] - opp_position_xy[type_mask, 1], 
-            #                                     opp_traj_xy[next_indices_traj, 0] - opp_position_xy[type_mask, 0])
+            new_positions[combined_mask, 0] = blended_pos[:,0] + env.scene.env_origins[combined_mask, 0] + torch.rand_like(blended_pos[:,0])*0.05
+            new_positions[combined_mask, 1] = blended_pos[:,1] + env.scene.env_origins[combined_mask, 1] + torch.rand_like(blended_pos[:,1])*0.05
 
-            _, opp_next_d = find_frenet_coord_along_waypoints(
-                waypoints_xy_world, 
-                opp_traj_xy[next_indices_traj]  # Only positions for current_type_env_ids
-            )
-            
-            env._opponent_d_dot[type_mask] = (opp_next_d - opp_current_d)/CONFIG['env_config']['OPP_MOVE_DT']
-            
-            # Convert yaw (psi) to quaternion for orientation
-            
-                #         if opp_type == 0:
-                # a = 1
-            target_yaw = opp_traj_psi[opp_current_indices]
-            new_orientations[type_mask] = torch.stack([
-                torch.ones_like(target_yaw),         # Quaternion w
-                torch.zeros_like(target_yaw),        # Quaternion x
-                torch.zeros_like(target_yaw),        # Quaternion y
-                torch.zeros_like(target_yaw)         # Quaternion z
+            # Compute speed as displacement / dt
+            disp = blended_pos - opp_position_xy[combined_mask]
+            env._opponent_speed[combined_mask] = torch.norm(disp, dim=1) / CONFIG['env_config']['OPP_MOVE_DT']
+
+            # Heading from displacement (safer than blended heading if you want kinematics)
+            env._opponent_heading[combined_mask] = torch.atan2(disp[:,1], disp[:,0])
+
+            # TODO: if you want to update _opponent_d_dot, you’d need to project blended_pos into Frenet coords too
+
+            # Convert yaw to quaternion (for now keep simple, identity rotation in x/y)
+            new_orientations[combined_mask] = torch.stack([
+                torch.cos(blended_psi/2.0),   # w
+                torch.zeros_like(blended_psi),# x
+                torch.zeros_like(blended_psi),# y
+                torch.sin(blended_psi/2.0)    # z
             ], dim=1)
-    
     
     # Apply all updates at once
     asset.write_root_pose_to_sim(

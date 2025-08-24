@@ -12,49 +12,6 @@ import isaaclab.envs.mdp as mdp
 import yaml
 with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/config/f1tenth_config.yaml", "r") as f:
     CONFIG = yaml.safe_load(f)
-    
-# def out_of_map(env):
-#     poses = mdp.root_pos_w(env)
-#     poses = poses[..., :2]
-#     terrain = env.scene[SceneEntityCfg("terrain").name]
-#     width = terrain.cfg.width_list[0]
-#     height = terrain.cfg.height_list[0]
-#     x_out_range = torch.logical_or(poses[..., 0] > width / 2, poses[..., 0] < -width / 2)
-#     y_out_range = torch.logical_or(poses[..., 1] > height / 2, poses[..., 1] < -height / 2)
-#     return torch.logical_or(x_out_range, y_out_range)
-
-
-# def upright_bool(env, thresh_deg):
-#     return upright_penalty(env, thresh_deg) > 0.0
-
-
-# def is_not_traversable(env):
-#     poses =mdp.root_pos_w(env)[..., :2]
-#     if not hasattr(env, '_map_levels'):
-#         env._map_levels = torch.zeros(env.num_envs, 
-#                                 dtype=torch.long,
-#                                 device=env.device)
-#     map_levels     = env._map_levels
-#     traversability = TraversabilityHashmapUtil().get_traversability(poses, map_levels)
-#     num_episodes   = env.common_step_counter // env.max_episode_length
-# #   delay the termination for the first 10 episodes
-#     # if num_episodes < 50:
-#     #     # return false (IS traversable)
-#     #     return torch.zeros(env.num_envs, device=env.device) == 1
-    
-#     if not hasattr(env, '_traversability_history'):
-#         env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
-#         env._traversability_history = torch.ones(
-#             (env.num_envs, env._rew_history_length), 
-#             dtype=torch.long,
-#             device=env.device
-#         )
-    
-#     env._traversability_history[:, 1:] = env._traversability_history[:, :-1].clone()
-#     env._traversability_history[:, 0] = traversability
-#     delayed_traversability = env._traversability_history[:,-1]
-
-#     return torch.logical_not(delayed_traversability)
 
 def wall_collision(env):
     pos_xy_world = mdp.root_pos_w(env)[..., :2]
@@ -67,7 +24,7 @@ def wall_collision(env):
 
     if not hasattr(env, '_wall_collision_history'):
         env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
-        env._wall_collision_history = torch.ones(
+        env._wall_collision_history = torch.zeros(
             (env.num_envs, env._rew_history_length), 
             dtype=torch.long,
             device=env.device
@@ -142,6 +99,14 @@ def opponent_collision(env):
                                 dtype=torch.float32,
                                 device=env.device)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']*CONFIG['env_config']['LEN_S_IDX']
         
+    if not hasattr(env, '_opponent_collision_history'):
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
+        env._opponent_collision_history = torch.zeros(
+            (env.num_envs, env._rew_history_length), 
+            dtype=torch.long,
+            device=env.device
+        )
+  
         
     ego_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("robot"))[..., :2]
     opp_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("opponent"))[:, :2]
@@ -149,7 +114,10 @@ def opponent_collision(env):
     dist = torch.norm(ego_position_xy - opp_position_xy, p=2, dim=1)
     opp_collision = dist < CONFIG['env_config']['OPP_COLLISION_RADIUS']
 
-    return opp_collision.bool()
+    env._opponent_collision_history[:, 1:] = env._opponent_collision_history[:, :-1].clone()
+    env._opponent_collision_history[:, 0] = opp_collision
+    
+    return env._opponent_collision_history[:, -1].bool()
 
 def opponent_overtaken(env):
 

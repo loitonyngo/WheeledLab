@@ -47,7 +47,7 @@ from .mdp import reset_root_state_random_with_opponent, reset_root_state_start_i
 from .mdp.observations import *
 from .mdp.rewards import *
 from .mdp.terminations import *
-from .mdp.events import move_opponent_s_based, move_opponent_vel_based
+from .mdp.events import move_opponent_s_based
 
 
 import omni.usd
@@ -135,8 +135,8 @@ class F1TenthOvertakeObsCfg:
                     't_horizon': T_HORIZON}
         )
 
-        opponent_frenet_info = ObsTerm(
-            func=opponent_frenet_info
+        opponent_info = ObsTerm(
+            func=opponent_info
         )
         
         gaps_info = ObsTerm(
@@ -232,7 +232,7 @@ class F1TenthOvertakeTerrainImporterCfg(TerrainImporterCfg):
                 y + random.uniform(-1,1)*max_radius_offset, 
                 0.02),
                 rot_euler_xyz_deg=(0., 0., angle),
-                lin_vel=(vx*0.9, vy*0.9, 0.0),  # Add linear velocity
+                lin_vel=(0.0, 0, 0.0),  # Add linear velocity
                 ang_vel=(0.0, 0.0, 0.0)  # Angular velocity is zero
             ) for (x, y, angle), (vx, vy) in zip(init_poses, ego_velocities)
         ]
@@ -528,27 +528,27 @@ class F1TenthOvertakeRewardsCfg:
     
     wall_collision_penalty = RewTerm(
         func=wall_collision_penalty,
-        weight=1,
+        weight=0.5,
     )
 
     opponent_collision_penalty = RewTerm(
         func=opponent_collision_penalty,
-        weight=1,
+        weight=0.5,
     )
 
     opponent_overtake_completed_reward = RewTerm(
         func=opponent_overtake_completed_reward,
-        weight=1,
+        weight=20,
     )
     
     opponent_overtake_distance_reward = RewTerm(
         func=opponent_overtake_distance_reward,
-        weight=0.001,
+        weight=0.01,
     )
 
     opponent_overtake_delta_distance_reward = RewTerm(
         func=opponent_overtake_delta_distance_reward,
-        weight=0.0,
+        weight=10,
     )
 
     # opponent_overtake_positioning_reward = RewTerm(
@@ -556,20 +556,19 @@ class F1TenthOvertakeRewardsCfg:
     #     weight=0.1,
     # )
 
-
+    # var_throttle_rate_penalty =  RewTerm(
+    #     func=var_throttle_rate_penalty,
+    #     weight=0.00,
+    # )
+    
     var_throttle_penalty =  RewTerm(
         func=var_throttle_penalty,
-        weight=0.03,
-    )
-
-    var_throttle_rate_penalty =  RewTerm(
-        func=var_throttle_rate_penalty,
-        weight=0.00,
+        weight=0.01,
     )
     
     var_steering_penalty =  RewTerm(
         func=var_steering_penalty,
-        weight=0.1,
+        weight=0.01,
     )
 
     effort_throttle_penalty =  RewTerm(
@@ -579,10 +578,13 @@ class F1TenthOvertakeRewardsCfg:
     
     effort_steering_penalty =  RewTerm(
         func=effort_steering_penalty,
-        weight=0.05,
+        weight=0.01,
     )
 
-
+    # low_speed_penalty =  RewTerm(
+    #     func=low_speed_penalty,
+    #     weight=0.0,
+    # )
     if CONFIG['env_config']['CONSTANT_SPEED']:
         # # # Reward terms to test various frictions, simple task (constant velocity and steering, drive in circle)
         speed_target_rew = RewTerm(
@@ -597,17 +599,29 @@ class F1TenthOvertakeRewardsCfg:
 ###### CURRICULUM ######
 ########################
 
+MAX_NUM_INC = 5
 @configclass
 class OvertakeCurriculumCfg:
 
+    progress_rew = CurrTerm(
+        func=increase_reward_weight_over_time,
+        params={
+            "reward_term_name": "progress_rew",
+            "weight_increase": -0.15,
+            "first_episode_increase": 50,
+            "episodes_per_increase": 50,
+            "max_num_increases": MAX_NUM_INC,
+        }
+    )
+    
     wall_collision_penalty = CurrTerm(
         func=increase_reward_weight_over_time,
         params={
             "reward_term_name": "wall_collision_penalty",
-            "weight_increase": 0,
+            "weight_increase": 0.1,
             "first_episode_increase": 50,
             "episodes_per_increase": 50,
-            "max_num_increases": 0,
+            "max_num_increases": MAX_NUM_INC,
         }
     )
 
@@ -615,24 +629,35 @@ class OvertakeCurriculumCfg:
         func=increase_reward_weight_over_time,
         params={
             "reward_term_name": "opponent_collision_penalty",
-            "weight_increase": 1,
+            "weight_increase": 0.2,
             "first_episode_increase": 50,
             "episodes_per_increase": 50,
-            "max_num_increases": 0,
+            "max_num_increases": MAX_NUM_INC,
         }
     )
 
-    opponent_overtake_closing_reward = CurrTerm(
+    opponent_overtake_delta_distance_reward = CurrTerm(
         func=increase_reward_weight_over_time,
         params={
-            "reward_term_name": "opponent_overtake_closing_reward",
-            "weight_increase": 0.5,
-            "first_episode_increase": 50,
-            "episodes_per_increase": 50,
-            "max_num_increases": 0,
+            "reward_term_name": "opponent_overtake_delta_distance_reward",
+            "weight_increase": 2,
+            "first_episode_increase": 25,
+            "episodes_per_increase": 25,
+            "max_num_increases": MAX_NUM_INC,
         }
     )
 
+    opponent_overtake_distance_reward = CurrTerm(
+        func=increase_reward_weight_over_time,
+        params={
+            "reward_term_name": "opponent_overtake_distance_reward",
+            "weight_increase": 0.03,
+            "first_episode_increase": 25,
+            "episodes_per_increase": 25,
+            "max_num_increases": MAX_NUM_INC,
+        }
+    )
+    
     # opponent_overtake_positioning_reward = CurrTerm(
     #     func=increase_reward_weight_over_time,
     #     params={
@@ -829,6 +854,7 @@ class F1TenthOvertakeEnv(ManagerBasedEnv):
         super().__init__(cfg, **kwargs)
         
         # Initialize buffers needed in observations, rewards, etc
+        ########### CACHE MAP WAYPOINTS IN ENV AS TENSOR ##########
 
         # Save the initial waypoint idx (as soon as the car respawns)
         self._initial_waypoint_indices = torch.zeros(self.num_envs, 
@@ -937,6 +963,12 @@ class F1TenthOvertakeEnv(ManagerBasedEnv):
             device=self.device
         )
 
+        self._opponent_trajectory_alpha = torch.ones(
+            self.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float16,
+            device=self.device
+        )
+
         self._opponent_overtaken_bool = torch.zeros(
             self.num_envs,  # Shape: (num_envs, history_length, n_actions)
             dtype=torch.bool,
@@ -960,6 +992,69 @@ class F1TenthOvertakeEnv(ManagerBasedEnv):
             dtype=torch.float32,
             device=self.device
         )
+        
+        self._opponent_always_ahead = torch.zeros(
+            self.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.bool,
+            device=self.device
+        )
+
+        self._opponent_collision_history = torch.zeros(
+            (self.num_envs, self._rew_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.long,
+            device=self.device
+        )
+
+        self._waypoints_list = [
+            torch.tensor(wps, device=self.device, dtype=torch.float32)
+            for wps in cfg.waypoints_list
+        ]
+
+        self._outer_list = [
+            torch.tensor(outer, device=self.device, dtype=torch.float32)
+            for outer in cfg.outer_list
+        ]
+
+        self._inner_list = [
+            torch.tensor(inner, device=self.device, dtype=torch.float32)
+            for inner in cfg.inner_list
+        ]
+
+        self._d_lat_list = [
+            torch.tensor(d_lat, device=self.device, dtype=torch.float32)
+            for d_lat in cfg.d_lat_list
+        ]
+
+        self._psi_rad_list = [
+            torch.tensor(psi, device=self.device, dtype=torch.float32)
+            for psi in cfg.psi_rad_list
+        ]
+
+        self._kappa_radpm_list = [
+            torch.tensor(kappa, device=self.device, dtype=torch.float32)
+            for kappa in cfg.kappa_radpm_list
+        ]
+
+        self._vx_mps_list = [
+            torch.tensor(vx, device=self.device, dtype=torch.float32)
+            for vx in cfg.vx_mps_list
+        ]
+
+        self._opp_traj_center_list = [
+            torch.tensor(center, device=self.device, dtype=torch.float32)
+            for center in cfg.opp_traj_center_list
+        ]
+
+        self._opp_traj_iqp_list = [
+            torch.tensor(iqp, device=self.device, dtype=torch.float32)
+            for iqp in cfg.opp_traj_iqp_list
+        ]
+
+        self._opp_traj_sp_list = [
+            torch.tensor(sp, device=self.device, dtype=torch.float32)
+            for sp in cfg.opp_traj_sp_list
+        ]
+
         
 @configclass
 class F1TenthOvertakeRLRandomEnvCfg(F1TenthOvertakeRLEnvCfg):
