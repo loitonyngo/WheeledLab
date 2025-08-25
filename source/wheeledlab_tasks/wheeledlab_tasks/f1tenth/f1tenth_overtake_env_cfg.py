@@ -109,34 +109,41 @@ class F1TenthOvertakeObsCfg:
             func=action_history,
         )
 
-        heading_error = ObsTerm(
-            func=heading_error_horizon,
+        track_info_horizon = ObsTerm(
+            func=track_info_horizon,
             params={'delta_s_idx': DELTA_S_IDX,
                     'n_horizon': N_HORIZON,
                     't_horizon': T_HORIZON}
         )
-        deviation_error = ObsTerm(
-            func=deviation_centerline_horizon,
-            params={'delta_s_idx': DELTA_S_IDX,
-                    'n_horizon': N_HORIZON,
-                    't_horizon': T_HORIZON}
-        )
-        d_lat_horizon = ObsTerm(
-            func=d_lat_horizon,
-            params={'delta_s_idx': DELTA_S_IDX,
-                    'n_horizon': N_HORIZON,
-                    't_horizon': T_HORIZON}
-        )
-        #only one env gives problem
-        kappa_radpm_horizon = ObsTerm(
-            func=kappa_radpm_horizon,
-            params={'delta_s_idx': DELTA_S_IDX,
-                    'n_horizon': N_HORIZON,
-                    't_horizon': T_HORIZON}
-        )
+        
+        # heading_error = ObsTerm(
+        #     func=heading_error_horizon,
+        #     params={'delta_s_idx': DELTA_S_IDX,
+        #             'n_horizon': N_HORIZON,
+        #             't_horizon': T_HORIZON}
+        # )
+        # deviation_error = ObsTerm(
+        #     func=deviation_centerline_horizon,
+        #     params={'delta_s_idx': DELTA_S_IDX,
+        #             'n_horizon': N_HORIZON,
+        #             't_horizon': T_HORIZON}
+        # )
+        # d_lat_horizon = ObsTerm(
+        #     func=d_lat_horizon,
+        #     params={'delta_s_idx': DELTA_S_IDX,
+        #             'n_horizon': N_HORIZON,
+        #             't_horizon': T_HORIZON}
+        # )
+        # #only one env gives problem
+        # kappa_radpm_horizon = ObsTerm(
+        #     func=kappa_radpm_horizon,
+        #     params={'delta_s_idx': DELTA_S_IDX,
+        #             'n_horizon': N_HORIZON,
+        #             't_horizon': T_HORIZON}
+        # )
 
-        opponent_info = ObsTerm(
-            func=opponent_info
+        opponent_info_history = ObsTerm(
+            func=opponent_info_history
         )
         
         gaps_info = ObsTerm(
@@ -274,7 +281,7 @@ class F1TenthOvertakeSceneCfg(InteractiveSceneCfg):
     MAP_NAME_LIST = None
     ground = AssetBaseCfg(
         prim_path="/World/base",
-        spawn = sim_utils.GroundPlaneCfg(size=(500, 500),
+        spawn = sim_utils.GroundPlaneCfg(size=(1000 , 1000),
                                          color=(0,0,0),
                                          physics_material=sim_utils.RigidBodyMaterialCfg(
                                             friction_combine_mode="multiply",
@@ -641,8 +648,8 @@ class OvertakeCurriculumCfg:
         params={
             "reward_term_name": "opponent_overtake_delta_distance_reward",
             "weight_increase": 2,
-            "first_episode_increase": 25,
-            "episodes_per_increase": 25,
+            "first_episode_increase": 50,
+            "episodes_per_increase": 50,
             "max_num_increases": MAX_NUM_INC,
         }
     )
@@ -652,8 +659,8 @@ class OvertakeCurriculumCfg:
         params={
             "reward_term_name": "opponent_overtake_distance_reward",
             "weight_increase": 0.03,
-            "first_episode_increase": 25,
-            "episodes_per_increase": 25,
+            "first_episode_increase": 50,
+            "episodes_per_increase": 50,
             "max_num_increases": MAX_NUM_INC,
         }
     )
@@ -673,10 +680,10 @@ class OvertakeCurriculumCfg:
         func=increase_reward_weight_over_time,
         params={
             "reward_term_name": "var_throttle_penalty",
-            "weight_increase": 0.01,
-            "first_episode_increase": 4,
-            "episodes_per_increase": 4,
-            "max_num_increases": 0,
+            "weight_increase": 0.025,
+            "first_episode_increase": 25,
+            "episodes_per_increase": 25,
+            "max_num_increases": 10,
         }
     )
 
@@ -684,10 +691,10 @@ class OvertakeCurriculumCfg:
         func=increase_reward_weight_over_time,
         params={
             "reward_term_name": "var_steering_penalty",
-            "weight_increase": 0.01,
-            "first_episode_increase": 4,
-            "episodes_per_increase": 4,
-            "max_num_increases": 0,
+            "weight_increase": 0.025,
+            "first_episode_increase": 25,
+            "episodes_per_increase": 25,
+            "max_num_increases": 10,
         }
     )
 
@@ -1005,6 +1012,32 @@ class F1TenthOvertakeEnv(ManagerBasedEnv):
             device=self.device
         )
 
+        self._s_idx_diff_history = torch.zeros(
+            (self.num_envs, self._obs_history_length), 
+            dtype=torch.float32,
+            device=self.device
+        )
+
+        self._d_diff_history = torch.zeros(
+            (self.num_envs, self._obs_history_length), 
+            dtype=torch.float32,
+            device=self.device
+        )
+
+        self._vx_diff_history = torch.zeros(
+            (self.num_envs, self._obs_history_length), 
+            dtype=torch.float32,
+            device=self.device
+        )
+
+        self._heading_diff_history = torch.zeros(
+            (self.num_envs, self._obs_history_length), 
+            dtype=torch.float32,
+            device=self.device
+        )
+                                
+        ######################################################################
+        ################# TRACK INFO STORED AS TENSOR IN LISTS ###############
         self._waypoints_list = [
             torch.tensor(wps, device=self.device, dtype=torch.float32)
             for wps in cfg.waypoints_list

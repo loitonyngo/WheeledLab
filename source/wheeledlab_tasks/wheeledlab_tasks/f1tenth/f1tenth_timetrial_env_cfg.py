@@ -255,7 +255,7 @@ class F1TenthTimeTrialSceneCfg(InteractiveSceneCfg):
     MAP_NAME_LIST = None
     ground = AssetBaseCfg(
         prim_path="/World/base",
-        spawn = sim_utils.GroundPlaneCfg(size=(1000, 1000),
+        spawn = sim_utils.GroundPlaneCfg(size=(1500, 1500),
                                          color=(0,0,0),
                                          physics_material=sim_utils.RigidBodyMaterialCfg(
                                             friction_combine_mode="multiply",

@@ -29,7 +29,17 @@ def wall_collision(env):
             dtype=torch.long,
             device=env.device
         )
-  
+    if not hasattr(env, '_outer_list'):
+        env._outer_list = [
+            torch.tensor(outer, device=env.device, dtype=torch.float32)
+            for outer in env.scene.terrain.cfg.outer_list
+        ]
+    if not hasattr(env, '_inner_list'):
+        env._inner_list = [
+            torch.tensor(inner, device=env.device, dtype=torch.float32)
+            for inner in env.scene.terrain.cfg.inner_list
+        ]        
+          
     # Get map levels for all environments
     map_levels = env._map_levels  # shape: [num_envs]
     unique_map_levels = torch.unique(map_levels)
@@ -50,17 +60,8 @@ def wall_collision(env):
         map_positions = pos_xy_world[env_mask]
         
         # Get waypoints for this map level
-        inner_xy_world = torch.tensor(
-            env.scene.terrain.cfg.inner_list[map_level],
-            device=env.device,
-            dtype=torch.float32
-        )[:, :2]
-
-        outer_xy_world = torch.tensor(
-            env.scene.terrain.cfg.outer_list[map_level],
-            device=env.device,
-            dtype=torch.float32
-        )[:, :2]
+        inner_xy_world = env._inner_list[map_level][:, :2]
+        outer_xy_world = env._outer_list[map_level][:, :2]
 
         # Calculate distances to ALL inner and outer points
         # Expand dimensions for broadcasting: [num_envs, 1, 2] - [1, num_points, 2] = [num_envs, num_points]
@@ -171,10 +172,7 @@ def far_from_opponent(
             continue
             
         # Get waypoints for this map level
-        waypoints_world = torch.tensor(
-            env.scene.terrain.cfg.waypoints_list[map_level], 
-            device=env.device
-        )[:, :2]
+        waypoints_world = env._waypoints_list[map_level][:, :2]
         num_waypoints = len(waypoints_world)
 
         # Find nearest waypoint for these environments

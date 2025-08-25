@@ -30,7 +30,7 @@ parser = argparse.ArgumentParser(description="Play a policy in WheeledLab.")
 ###### DEFINE POLICY TO PLAY ######
 ###################################
 DEFAULT_LOGS_PATH = "/home/tongo/WheeledLab/source/wheeledlab_rl/logs/"
-POLICY = "20250820_1336run" 
+POLICY = "20250825_0250" 
 SAVE_NAME = 'test'
 SAVE_DIR = '/home/tongo/WheeledLab/source/wheeledlab_rl/logs_play_policy'
 TIMESTAMP = datetime.now().strftime("%m%d_%H%M")
@@ -50,7 +50,7 @@ parser.add_argument("--task", type=str, default=None, help="Task name. Overrides
 parser.add_argument("--policy-path", type=str, default=None, help="Path to policy file.")
 
 # Playback
-parser.add_argument("--steps", type=int, default=200, help="Length of recorded video in steps")
+parser.add_argument("--steps", type=int, default=500, help="Length of recorded video in steps")
 # Logging
 parser.add_argument('-sd', "--save-data", action="store_true", default=True, help="Save episode data")
 parser.add_argument("--save-name", type=str, default=SAVE_NAME, help="Name save file.")
@@ -345,8 +345,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     # Plot linear velocities
     ax2.plot(time[start_idx:end_idx], vel_x[start_idx:end_idx], 
             color='g', label='Lin Vel X (sim)')
-    ax2.plot(time[start_idx:end_idx], np.cumsum(np.clip(actions[start_idx:end_idx, 0, 0], -0.15, 0.15)), 
-            color='lime', label='Model cmd velocity')
+    # ax2.plot(time[start_idx:end_idx], np.cumsum(np.clip(actions[start_idx:end_idx, 0, 0]*0.15, -0.15, 0.15)), 
+    #         color='lime', label='Model cmd velocity')
     
     ax2.plot(time[start_idx:end_idx], -vel_y[start_idx:end_idx], 
             color='b', label='Lin Vel Y (sim)')

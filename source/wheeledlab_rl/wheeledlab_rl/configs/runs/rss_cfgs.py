@@ -9,7 +9,7 @@ from wheeledlab_rl.configs import (
 timestamp = datetime.now().strftime("%Y%m%d_%H%M")
 
 @configclass
-class RSS_TEST_TIMETRIAL(RslRlRunConfig):
+class RSS_TIMETRIAL(RslRlRunConfig):
     env_setup = EnvSetup(
         num_envs=128,
         env_spacing= 12,
@@ -22,7 +22,7 @@ class RSS_TEST_TIMETRIAL(RslRlRunConfig):
         rl_algo_class="ppo",
         log=LogConfig(
             video_interval=50000,
-            run_name = timestamp + 'run'
+            run_name = timestamp
         ),
     )
     agent_setup = AgentSetup(
@@ -30,10 +30,10 @@ class RSS_TEST_TIMETRIAL(RslRlRunConfig):
     )
 
 @configclass
-class RSS_TEST_OVERTAKE(RslRlRunConfig):
+class RSS_OVERTAKE(RslRlRunConfig):
     env_setup = EnvSetup(
-        num_envs=64,
-        env_spacing= 18,
+        num_envs=4096,
+        env_spacing= 12,
         task_name="Isaac-F1TenthOvertakeRL-v0"
     )
     # unique-jazz-683
@@ -43,7 +43,7 @@ class RSS_TEST_OVERTAKE(RslRlRunConfig):
         rl_algo_class="ppo",
         log=LogConfig(
             video_interval=50000,
-            run_name = timestamp + 'run'
+            run_name = timestamp
         ),
     )
     agent_setup = AgentSetup(

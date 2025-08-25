@@ -22,6 +22,16 @@ def wall_collision_penalty(env):
         env._map_levels = torch.zeros(env.num_envs, 
                                 dtype=torch.long,
                                 device=env.device)
+    if not hasattr(env, '_outer_list'):
+        env._outer_list = [
+            torch.tensor(outer, device=env.device, dtype=torch.float32)
+            for outer in env.scene.terrain.cfg.outer_list
+        ]
+    if not hasattr(env, '_inner_list'):
+        env._inner_list = [
+            torch.tensor(inner, device=env.device, dtype=torch.float32)
+            for inner in env.scene.terrain.cfg.inner_list
+        ]        
         
     # Get map levels for all environments
     map_levels = env._map_levels  # shape: [num_envs]
@@ -43,17 +53,8 @@ def wall_collision_penalty(env):
         map_positions = pos_xy_world[env_mask]
         
         # Get waypoints for this map level
-        inner_xy_world = torch.tensor(
-            env.scene.terrain.cfg.inner_list[map_level],
-            device=env.device,
-            dtype=torch.float32
-        )[:, :2]
-
-        outer_xy_world = torch.tensor(
-            env.scene.terrain.cfg.outer_list[map_level],
-            device=env.device,
-            dtype=torch.float32
-        )[:, :2]
+        inner_xy_world = env._inner_list[map_level][:, :2]
+        outer_xy_world = env._outer_list[map_level][:, :2]
 
         # Find nearest waypoint for these environments
         nearest_to_inner_idx, dist_from_inner = find_frenet_coord_along_waypoints(inner_xy_world, map_positions)  # shape: [num_envs_in_map]
@@ -142,18 +143,10 @@ def opponent_overtake_delta_distance_reward(env):
             continue
             
         # Get waypoints for this map level
-        waypoints_world = torch.tensor(
-            env.scene.terrain.cfg.waypoints_list[map_level], 
-            device=env.device
-        )[:, :2]
+        waypoints_world = env._waypoints_list[map_level][:, :2]
+        inner_xy_world = env._inner_list[map_level][:, :2]
         num_waypoints = len(waypoints_world)
 
-        inner_xy_world = torch.tensor(
-            env.scene.terrain.cfg.inner_list[map_level],
-            device=env.device,
-            dtype=torch.float32
-        )[:, :2]
-        
         # Use the inner so that taking the inside is incentivezed ?
         ego_current_idx, _ = find_frenet_coord_along_waypoints(
             waypoints_world, 
@@ -209,7 +202,17 @@ def opponent_overtake_distance_reward(env):
         env._map_levels = torch.zeros(env.num_envs, 
                                 dtype=torch.long,
                                 device=env.device)
-        
+    if not hasattr(env, '_waypoints_list'):
+        env._waypoints_list = [
+            torch.tensor(wps, device=env.device, dtype=torch.float32)
+            for wps in env.scene.terrain.cfg.waypoints_list
+    ]
+    if not hasattr(env, '_inner_list'):
+        env._inner_list = [
+            torch.tensor(inner, device=env.device, dtype=torch.float32)
+            for inner in env.scene.terrain.cfg.inner_list
+        ]
+    
     if not hasattr(env, '_progress_history_indices'):
         env._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']  # Store last 10 waypoints
 
@@ -243,18 +246,10 @@ def opponent_overtake_distance_reward(env):
             continue
             
         # Get waypoints for this map level
-        waypoints_world = torch.tensor(
-            env.scene.terrain.cfg.waypoints_list[map_level], 
-            device=env.device
-        )[:, :2]
+        waypoints_world = env._waypoints_list[map_level][:, :2]
+        inner_xy_world = env._inner_list[map_level][:, :2]
         num_waypoints = len(waypoints_world)
-        
-        inner_xy_world = torch.tensor(
-            env.scene.terrain.cfg.inner_list[map_level],
-            device=env.device,
-            dtype=torch.float32
-        )[:, :2]
-        
+
         # Use the inner so that taking the inside is incentivezed ?
         ego_current_idx, _ = find_frenet_coord_along_waypoints(
             waypoints_world, 
@@ -338,13 +333,9 @@ def opponent_overtake_completed_reward(env):
             
         # Get waypoints for this map level
         waypoints_world = env._waypoints_list[map_level][:, :2]
+        inner_xy_world = env._inner_list[map_level][:, :2]
+        num_waypoints = len(waypoints_world)
 
-
-        inner_xy_world = torch.tensor(
-            env.scene.terrain.cfg.inner_list[map_level],
-            device=env.device,
-            dtype=torch.float32
-        )[:, :2]
         
         # Use the inner so that taking the inside is incentivezed ?
         ego_current_idx, _ = find_frenet_coord_along_waypoints(
@@ -453,7 +444,6 @@ def opponent_overtake_positioning_reward(env):
             
         # Get waypoints for this map level
         waypoints_world = env._waypoints_list[map_level][:, :2]
-
         num_waypoints = len(waypoints_world)
 
         # Find nearest waypoint for these environments
@@ -618,7 +608,6 @@ def progress_waypoint_bool(env):
         # Get waypoints for this map level
         waypoints_world = env._waypoints_list[map_level][:, :2]
 
-        
         # Find nearest waypoint for these environments
         current_idx, _ = find_frenet_coord_along_waypoints(
             waypoints_world, 
@@ -644,7 +633,6 @@ def progress_waypoint_bool(env):
     # Reset flags
     env._reset_env_bool = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
     
-    
     asset = env.scene["robot"]
     
     if not hasattr(env, '_vel_y_calc'):
@@ -660,6 +648,7 @@ def progress_waypoint_bool(env):
             device=env.device
             )
     env._vel_y_calc =  mdp.base_lin_vel(env)[:, 1]*mdp.base_lin_vel(env)[:, 0]*1.2
+    
     ###########################
     # Store extras (using first map's waypoints count for simplicity), only necessary when you play policy, find a better way to implement it
     # env.extras['inner'] =  torch.tensor(env.scene.terrain.cfg.inner_list[map_level][current_idx], device=env.device)
