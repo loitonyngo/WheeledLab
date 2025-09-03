@@ -12,590 +12,316 @@ import isaaclab.envs.mdp as mdp
 import yaml
 with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/config/f1tenth_config.yaml", "r") as f:
     CONFIG = yaml.safe_load(f)
-
-def reset_root_state_random(
-    env: ManagerBasedEnv,
-    env_ids: torch.Tensor,
-    # valid_posns_and_rots: dict[str, tuple[float, float]],
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-):
-    # access the used quantities (to enable type-hinting)
-    asset: RigidObject | Articulation = env.scene[asset_cfg.name]
-    terrain: TerrainImporter = env.scene.terrain
-
-    if not hasattr(env, '_map_levels'):
-        env._map_levels = torch.zeros(env.num_envs, 
-                                    dtype=torch.long,
-                                    device=env.device)
+    
+#--------
+# Common helpers
+# ---------------------------------------------------------------------------
         
-    env._map_levels[env_ids] = torch.tensor(np.floor(np.random.rand(len(env_ids))*len(env.cfg.scene.terrain.map_name_list)), device = env.device, dtype=torch.long)
-
-    # valid_poses = terrain.cfg.generate_poses_from_init_points(env, env_ids)
-    valid_poses, current_idx_np = terrain.cfg.generate_random_poses_from_waypoints(env=env, env_ids=env_ids, num_poses=len(env_ids), max_radius_offset=0.5)
-    current_idx = torch.tensor(current_idx_np, dtype=torch.long, device=env.device)
-
-    # Tensorizes the valid poses
-    posns = torch.stack(list(map(lambda x: torch.tensor(x.pos, device=env.device), valid_poses))).float()
-    oris = list(map(lambda x: torch.deg2rad(torch.tensor(x.rot_euler_xyz_deg, device=env.device)), valid_poses))
-    oris = torch.stack([math_utils.quat_from_euler_xyz(*ori) for ori in oris]).float()
-    lin_vels = torch.stack(list(map(lambda x: torch.tensor(x.lin_vel, device=env.device), valid_poses))).float()
-    ang_vels = torch.stack(list(map(lambda x: torch.tensor(x.ang_vel, device=env.device), valid_poses))).float()
-
-    positions = posns
-    positions += asset.data.default_root_state[env_ids, :3]
-    orientations = oris
-
-    lin_vels = lin_vels
-    lin_vels += asset.data.default_root_state[env_ids, 7:10]
-    ang_vels = ang_vels
-    ang_vels += asset.data.default_root_state[env_ids, 10:13]
-
-    # set into the physics simulation
-    asset.write_root_pose_to_sim(torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
-    asset.write_root_velocity_to_sim(torch.cat([lin_vels, ang_vels], dim=-1), env_ids=env_ids)
+def _init_common_histories(env: ManagerBasedEnv):
+    """Initialize histories/buffers that are common across reset functions."""
+    if not hasattr(env, '_map_levels'):
+        env._map_levels = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
 
     if not hasattr(env, '_initial_waypoint_indices'):
-        env._initial_waypoint_indices = torch.zeros(env.num_envs, 
-                                                dtype=torch.long,
-                                                device=env.device)
+        env._initial_waypoint_indices = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+
+    if not hasattr(env, '_total_progress_indices'):
+        env._total_progress_indices = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
         
     if not hasattr(env, '_reset_env_bool'):
-        env._reset_env_bool = torch.ones(  # Tracks where to insert the next index
-            env.num_envs,
-            dtype=torch.bool,
-            device=env.device
-        )
+        env._reset_env_bool = torch.ones(env.num_envs, dtype=torch.bool, device=env.device)
 
     if not hasattr(env, '_progress_history_indices'):
-        env._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']  # Store last 10 waypoints
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
         env._progress_history_indices = torch.zeros(
-            (env.num_envs, env._progress_history_length), 
+            (env.num_envs, env._rew_history_length),
             dtype=torch.long,
-            device=env.device
+            device=env.device,
         )
+
     if not hasattr(env, '_action_history_length'):
         env._action_history_length = CONFIG['env_config']['ACTION_HISTORY_LENGTH']
 
     if not hasattr(env, '_action_history'):
         env._action_history = torch.zeros(
-            (env.num_envs, env._action_history_length, 2), 
+            (env.num_envs, env._action_history_length, 2),
             dtype=torch.float32,
-            device=env.device
+            device=env.device,
         )
 
     if not hasattr(env, '_obs_history_length'):
         env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
 
-    if not hasattr(env, '_base_lin_vel_x_history'):
-        env._base_lin_vel_x_history = torch.zeros(
-            (env.num_envs, env._obs_history_length), 
-            dtype=torch.float32,
-            device=env.device
-        )
-
-    if not hasattr(env, '_base_lin_vel_y_history'):
-        env._base_lin_vel_y_history = torch.zeros(
-            (env.num_envs, env._obs_history_length), 
-            dtype=torch.float32,
-            device=env.device
-        )
-
-    if not hasattr(env, '_base_ang_vel_z_history'):
-        env._base_ang_vel_z_history = torch.zeros(
-            (env.num_envs, env._obs_history_length), 
-            dtype=torch.float32,
-            device=env.device
-        )
+    for name in ['_base_lin_vel_x_history', '_base_lin_vel_y_history',
+                 '_base_ang_vel_z_history', '_target_velocity_history']:
+        if not hasattr(env, name):
+            setattr(env, name, torch.zeros(
+                (env.num_envs, env._obs_history_length),
+                dtype=torch.float32,
+                device=env.device,
+            ))
 
     if not hasattr(env, '_wall_collision_history'):
         env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
         env._wall_collision_history = torch.ones(
-            (env.num_envs, env._rew_history_length), 
+            (env.num_envs, env._rew_history_length),
             dtype=torch.long,
-            device=env.device
+            device=env.device,
         )
 
-    if not hasattr(env, '_target_velocity_history'):
-        env._target_velocity_history = torch.zeros(
-            (env.num_envs, env._obs_history_length), 
-            dtype=torch.float32,
-            device=env.device
-        )
-        
-        
-    # set boolean so that it knows it just resetted
-    env._initial_waypoint_indices[env_ids] = current_idx.clone()  
-    env._reset_env_bool[env_ids] = torch.ones(len(env_ids), dtype=bool, device=env.device)
-    env._progress_history_indices[env_ids, :] =  torch.zeros(env._progress_history_length, dtype=torch.long, device=env.device)
-    env._action_history[env_ids, :, :] = torch.zeros((len(env_ids), env._action_history_length, 2), dtype=torch.float32, device=env.device)
 
-    env._base_lin_vel_x_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
-    env._base_lin_vel_y_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
-    env._base_ang_vel_z_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
-    env._target_velocity_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
-
-    env._wall_collision_history[env_ids, :] = torch.zeros((len(env_ids), env._rew_history_length), dtype=torch.long, device=env.device)
-
-def reset_root_state_random_with_opponent(
-    env: ManagerBasedEnv,
-    env_ids: torch.Tensor,
-    # valid_posns_and_rots: dict[str, tuple[float, float]],
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    opponent_asset_cfg: SceneEntityCfg = SceneEntityCfg("opponent"),
-):
-    # access the used quantities (to enable type-hinting)
-    asset: RigidObject | Articulation = env.scene[asset_cfg.name]
-    opponent_asset: RigidObject | Articulation = env.scene[opponent_asset_cfg.name]
-
-    terrain: TerrainImporter = env.scene.terrain
-
-    num_episodes = env.common_step_counter // env.max_episode_length
-
-    if not hasattr(env, '_map_levels'):
-        env._map_levels = torch.zeros(env.num_envs, 
-                                    dtype=torch.long,
-                                    device=env.device)
+def _reset_ego_state(env: ManagerBasedEnv, 
+                     env_ids: torch.Tensor,
+                     asset, 
+                     valid_poses, 
+                     current_idx):
     
-    if not hasattr(env, '_prev_delta_s_opp_ego'):
-        env._prev_delta_s_opp_ego = torch.ones(env.num_envs, 
-                                dtype=torch.float32,
-                                device=env.device)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']*CONFIG['env_config']['LEN_S_IDX']    
-        
-    env._map_levels[env_ids] = torch.tensor(np.floor(np.random.rand(len(env_ids))*len(env.cfg.scene.terrain.map_name_list)), device = env.device, dtype=torch.long)
+    """Reset the ego (robot) state."""
+    posns = torch.stack([torch.tensor(x.pos, device=env.device) for x in valid_poses]).float()
+    oris = torch.stack([
+        math_utils.quat_from_euler_xyz(*torch.deg2rad(torch.tensor(x.rot_euler_xyz_deg, device=env.device)))
+        for x in valid_poses
+    ]).float()
+    lin_vels = torch.stack([torch.tensor(x.lin_vel, device=env.device) for x in valid_poses]).float()
+    ang_vels = torch.stack([torch.tensor(x.ang_vel, device=env.device) for x in valid_poses]).float()
 
-    # valid_poses = terrain.cfg.generate_poses_from_init_points(env, env_ids)
-    ego_valid_poses, ego_current_idx_np, opp_valid_poses, opp_current_idx_np = terrain.cfg.generate_random_poses_from_waypoints_with_opponent(env=env, env_ids=env_ids, num_poses=len(env_ids), max_radius_offset=0.5)
-    current_idx = torch.tensor(ego_current_idx_np, dtype=torch.long, device=env.device)
-
-    # Tensorizes the valid poses
-    posns = torch.stack(list(map(lambda x: torch.tensor(x.pos, device=env.device), ego_valid_poses))).float()
-    oris = list(map(lambda x: torch.deg2rad(torch.tensor(x.rot_euler_xyz_deg, device=env.device)), ego_valid_poses))
-    oris = torch.stack([math_utils.quat_from_euler_xyz(*ori) for ori in oris]).float()
-    lin_vels = torch.stack(list(map(lambda x: torch.tensor(x.lin_vel, device=env.device), ego_valid_poses))).float()
-    ang_vels = torch.stack(list(map(lambda x: torch.tensor(x.ang_vel, device=env.device), ego_valid_poses))).float()
-
-    positions = posns
-    positions += asset.data.default_root_state[env_ids, :3]
+    positions = posns + asset.data.default_root_state[env_ids, :3]
     orientations = oris
-
-    lin_vels = lin_vels
     lin_vels += asset.data.default_root_state[env_ids, 7:10]
-    ang_vels = ang_vels
     ang_vels += asset.data.default_root_state[env_ids, 10:13]
 
-    # set into the physics simulation
     asset.write_root_pose_to_sim(torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
     asset.write_root_velocity_to_sim(torch.cat([lin_vels, ang_vels], dim=-1), env_ids=env_ids)
-    
-    if not hasattr(env, '_initial_waypoint_indices'):
-        env._initial_waypoint_indices = torch.zeros(env.num_envs, 
-                                                dtype=torch.long,
-                                                device=env.device)
-        
-    if not hasattr(env, '_reset_env_bool'):
-        env._reset_env_bool = torch.ones(  # Tracks where to insert the next index
-            env.num_envs,
-            dtype=torch.bool,
-            device=env.device
-        )
 
-    if not hasattr(env, '_progress_history_indices'):
-        env._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']  # Store last 10 waypoints
-        env._progress_history_indices = torch.zeros(
-            (env.num_envs, env._progress_history_length), 
-            dtype=torch.long,
-            device=env.device
-        )
-    if not hasattr(env, '_action_history_length'):
-        env._action_history_length = CONFIG['env_config']['ACTION_HISTORY_LENGTH']
-
-    if not hasattr(env, '_action_history'):
-        env._action_history = torch.zeros(
-            (env.num_envs, env._action_history_length, 2), 
-            dtype=torch.float32,
-            device=env.device
-        )
-
-    if not hasattr(env, '_obs_history_length'):
-        env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
-
-    if not hasattr(env, '_base_lin_vel_x_history'):
-        env._base_lin_vel_x_history = torch.zeros(
-            (env.num_envs, env._obs_history_length), 
-            dtype=torch.float32,
-            device=env.device
-        )
-
-    if not hasattr(env, '_base_lin_vel_y_history'):
-        env._base_lin_vel_y_history = torch.zeros(
-            (env.num_envs, env._obs_history_length), 
-            dtype=torch.float32,
-            device=env.device
-        )
-
-    if not hasattr(env, '_base_ang_vel_z_history'):
-        env._base_ang_vel_z_history = torch.zeros(
-            (env.num_envs, env._obs_history_length), 
-            dtype=torch.float32,
-            device=env.device
-        )
-
-    if not hasattr(env, '_traversability_history'):
-        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
-        env._traversability_history = torch.ones(
-            (env.num_envs, env._rew_history_length), 
-            dtype=torch.long,
-            device=env.device
-        )
-
-    if not hasattr(env, '_wall_collision_history'):
-        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
-        env._wall_collision_history = torch.ones(
-            (env.num_envs, env._rew_history_length), 
-            dtype=torch.long,
-            device=env.device
-        )
-        
-    if not hasattr(env, '_target_velocity_history'):
-        env._target_velocity_history = torch.zeros(
-            (env.num_envs, env._obs_history_length), 
-            dtype=torch.float32,
-            device=env.device
-        )
-        
-        
-    # set boolean so that it knows it just resetted
+    # Reset histories for these env_ids
     env._initial_waypoint_indices[env_ids] = current_idx.clone()  
     env._reset_env_bool[env_ids] = torch.ones(len(env_ids), dtype=bool, device=env.device)
-    env._progress_history_indices[env_ids, :] =  torch.zeros(env._progress_history_length, dtype=torch.long, device=env.device)
+    env._total_progress_indices[env_ids] = -current_idx.clone()  
+    env._progress_history_indices[env_ids, :] =  torch.zeros(env._rew_history_length, dtype=torch.long, device=env.device)
     env._action_history[env_ids, :, :] = torch.zeros((len(env_ids), env._action_history_length, 2), dtype=torch.float32, device=env.device)
-
     env._base_lin_vel_x_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
     env._base_lin_vel_y_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
     env._base_ang_vel_z_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
     env._target_velocity_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
-
-    env._traversability_history[env_ids, :] = torch.ones((len(env_ids), env._rew_history_length), dtype=torch.long, device=env.device)
     env._wall_collision_history[env_ids, :] = torch.zeros((len(env_ids), env._rew_history_length), dtype=torch.long, device=env.device)
 
-    env._prev_delta_s_opp_ego[env_ids]  = torch.ones(len(env_ids), 
-                                dtype=torch.float32,
-                                device=env.device)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']*CONFIG['env_config']['LEN_S_IDX']  
 
-    # Tensorize opponent poses and velocities
-    opp_posns = torch.stack(list(map(lambda x: torch.tensor(x.pos, device=env.device), opp_valid_poses))).float()
+
+# ---------------------------------------------------------------------------
+# Opponent-specific helpers
+# ---------------------------------------------------------------------------
+
+def _reset_opponent_state(env: ManagerBasedEnv, 
+                          env_ids: torch.Tensor,
+                          opponent_asset, 
+                          opp_valid_poses):
+    """Reset the opponent's pose and velocity."""
+    opp_posns = torch.stack([torch.tensor(x.pos, device=env.device) for x in opp_valid_poses]).float()
     opp_oris = torch.stack([
         math_utils.quat_from_euler_xyz(*torch.deg2rad(torch.tensor(x.rot_euler_xyz_deg, device=env.device)))
         for x in opp_valid_poses
     ]).float()
-    opp_lin_vels = torch.stack(list(map(lambda x: torch.tensor(x.lin_vel, device=env.device), opp_valid_poses))).float()*0
-    opp_ang_vels = torch.stack(list(map(lambda x: torch.tensor(x.ang_vel, device=env.device), opp_valid_poses))).float()
+    opp_lin_vels = torch.stack([torch.tensor(x.lin_vel, device=env.device) for x in opp_valid_poses]).float() * 0
+    opp_ang_vels = torch.stack([torch.tensor(x.ang_vel, device=env.device) for x in opp_valid_poses]).float()
 
-    # Apply opponent's default state offsets (assuming opponent asset has its own default state)
     opp_positions = opp_posns + opponent_asset.data.default_root_state[env_ids, :3]
     opp_orientations = opp_oris
     opp_lin_vels += opponent_asset.data.default_root_state[env_ids, 7:10]
     opp_ang_vels += opponent_asset.data.default_root_state[env_ids, 10:13]
+
     opponent_asset.write_root_pose_to_sim(torch.cat([opp_positions, opp_orientations], dim=-1), env_ids=env_ids)
     opponent_asset.write_root_velocity_to_sim(torch.cat([opp_lin_vels, opp_ang_vels], dim=-1), env_ids=env_ids)
 
 
-    if not hasattr(env, '_opponent_type'):
-        env._opponent_type = torch.zeros(
-            env.num_envs, 
-            dtype=torch.long,
-            device=env.device
-        )
-    if not hasattr(env, '_opponent_vel_scaling'):
-        env._opponent_vel_scaling = torch.ones(
-            env.num_envs, 
-            dtype=torch.float16,
-            device=env.device
-        )        
-
-    if not hasattr(env, '_opponent_trajectory_alpha'):
-        env._opponent_trajectory_alpha = torch.ones(
-            env.num_envs, 
-            dtype=torch.float16,
-            device=env.device
-        )        
-
-    if not hasattr(env, '_opponent_overtaken_bool'):
-       env._opponent_overtaken_bool = torch.zeros(
-            env.num_envs,  # Shape: (num_envs, history_length, n_actions)
-            dtype=torch.bool,
-            device=env.device
-        )
-    
-    if not hasattr(env, '_opponent_speed'):
-       env._opponent_speed = torch.zeros(
-            env.num_envs,  # Shape: (num_envs, history_length, n_actions)
-            dtype=torch.float32,
-            device=env.device
-        )
-
-    if not hasattr(env, '_opponent_d_dot'):
-        env._opponent_d_dot = torch.zeros(
-            env.num_envs,  # Shape: (num_envs, history_length, n_actions)
-            dtype=torch.float32,
-            device=env.device
-        )
-
-    if not hasattr(env, '_opponent_heading'):
-        env._opponent_heading = torch.zeros(
-            env.num_envs,  # Shape: (num_envs, history_length, n_actions)
-            dtype=torch.float32,
-            device=env.device
-        )
-
-    if not hasattr(env, '_opponent_always_ahead'):
-        env._opponent_always_ahead = torch.zeros(
-            env.num_envs,  # Shape: (num_envs, history_length, n_actions)
-            dtype=torch.bool,
-            device=env.device
-        )
-
-    if not hasattr(env, '_opponent_collision_history'):
-        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
-        env._opponent_collision_history = torch.zeros(
-            (env.num_envs, env._rew_history_length), 
-            dtype=torch.long,
-            device=env.device
-        )
-
-    if not hasattr(env, '_s_idx_diff_history'):
-        env._s_idx_diff_history = torch.zeros(
-            (env.num_envs, env._obs_history_length), 
-            dtype=torch.float32,
-            device=env.device
-        )
-
-    if not hasattr(env, '_d_diff_history'):
-        env._d_diff_history = torch.zeros(
-            (env.num_envs, env._obs_history_length), 
-            dtype=torch.float32,
-            device=env.device
-        )
-
-    if not hasattr(env, '_vx_diff_history'):
-        env._vx_diff_history = torch.zeros(
-            (env.num_envs, env._obs_history_length), 
-            dtype=torch.float32,
-            device=env.device
-        )
-
-    if not hasattr(env, '_heading_diff_history'):
-        env._heading_diff_history = torch.zeros(
-            (env.num_envs, env._obs_history_length), 
-            dtype=torch.float32,
-            device=env.device
-        )
-               
-    env._opponent_type[env_ids]           = torch.tensor(np.floor(np.random.rand(len(env_ids))*3), device = env.device, dtype=torch.long)
-    
-    if num_episodes < 25:
-        add_vel_scaling = 0.1
-    elif num_episodes < 50:
-        add_vel_scaling = 0.2
-    elif num_episodes < 100:
-        add_vel_scaling = 0.3
-    elif num_episodes < 150:
-        add_vel_scaling = 0.5
-    elif num_episodes < 200:
-        add_vel_scaling = 0.6
-    elif num_episodes < 250:
-        add_vel_scaling = 0.7
-    else:
-        add_vel_scaling = 0.8
-
-    env._opponent_vel_scaling[env_ids]         = torch.tensor(np.random.rand(len(env_ids))*add_vel_scaling, device = env.device, dtype=torch.float16)
-    env._opponent_trajectory_alpha[env_ids]    = torch.tensor(np.random.rand(len(env_ids)), device = env.device, dtype=torch.float16)
-    # env._opponent_trajectory_alpha[env_ids]    = torch.ones(len(env_ids), dtype=torch.float16, device=env.device)
-
-    env._opponent_overtaken_bool[env_ids] = torch.zeros(len(env_ids), dtype=bool, device=env.device)
-    env._opponent_speed[env_ids]          = torch.zeros(len(env_ids), dtype=torch.float32, device=env.device)
-    env._opponent_d_dot[env_ids]          = torch.zeros(len(env_ids), dtype=torch.float32, device=env.device)
-    env._opponent_heading[env_ids]        = torch.zeros(len(env_ids), dtype=torch.float32, device=env.device)
-    
-    random_val = torch.rand(len(env_ids), device=env.device)
-    env._opponent_always_ahead[env_ids]   = random_val < 0.1
-
-    env._opponent_collision_history[env_ids, :] = torch.zeros((len(env_ids), env._rew_history_length), dtype=torch.long, device=env.device)
-    env._s_idx_diff_history[env_ids, :]          = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
-    env._d_diff_history[env_ids, :]              = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
-    env._vx_diff_history[env_ids, :]             = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
-    env._heading_diff_history[env_ids, :]        = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
-
-# def reset_root_state_random_opponent(
-#     env: ManagerBasedEnv,
-#     env_ids: torch.Tensor,
-#     # valid_posns_and_rots: dict[str, tuple[float, float]],
-#     asset_cfg: SceneEntityCfg = SceneEntityCfg("opponent"),
-# ):
-#     # access the used quantities (to enable type-hinting)
-#     asset: RigidObject | Articulation = env.scene[asset_cfg.name]
-#     terrain: TerrainImporter = env.scene.terrain
-
-#     if not hasattr(env, '_map_levels'):
-#         env._map_levels = torch.zeros(env.num_envs, 
-#                                     dtype=torch.long,
-#                                     device=env.device)
-        
-#     if not hasattr(env, '_prev_delta_s_opp_ego'):
-#         env._prev_delta_s_opp_ego = torch.ones(env.num_envs, 
-#                                 dtype=torch.float32,
-#                                 device=env.device)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']*CONFIG['env_config']['LEN_S_IDX']  
-        
-#     env._map_levels[env_ids] = torch.tensor(np.floor(np.random.rand(len(env_ids))*len(env.cfg.scene.terrain.traversability_hashmap_list)), device = env.device, dtype=torch.long)
-
-#     # valid_poses = terrain.cfg.generate_poses_from_init_points(env, env_ids)
-#     valid_poses, current_idx_np = terrain.cfg.generate_random_poses_from_waypoints(env=env, env_ids=env_ids, num_poses=len(env_ids), max_radius_offset=1.5)
-#     current_idx = torch.tensor(current_idx_np, dtype=torch.long, device=env.device)
-
-#     # Tensorizes the valid poses
-#     posns = torch.stack(list(map(lambda x: torch.tensor(x.pos, device=env.device), valid_poses))).float()
-#     oris = list(map(lambda x: torch.deg2rad(torch.tensor(x.rot_euler_xyz_deg, device=env.device)), valid_poses))
-#     oris = torch.stack([math_utils.quat_from_euler_xyz(*ori) for ori in oris]).float()
-#     lin_vels = torch.stack(list(map(lambda x: torch.tensor(x.lin_vel, device=env.device), valid_poses))).float()
-#     ang_vels = torch.stack(list(map(lambda x: torch.tensor(x.ang_vel, device=env.device), valid_poses))).float()
-
-#     positions = posns
-#     positions += asset.data.default_root_state[env_ids, :3]
-#     orientations = oris
-
-#     lin_vels = lin_vels
-#     lin_vels += asset.data.default_root_state[env_ids, 7:10]
-#     ang_vels = ang_vels
-#     ang_vels += asset.data.default_root_state[env_ids, 10:13]
-
-#     # set into the physics simulation
-#     asset.write_root_pose_to_sim(torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
-#     asset.write_root_velocity_to_sim(torch.cat([lin_vels, ang_vels], dim=-1), env_ids=env_ids)
-
-#     env._prev_delta_s_opp_ego[env_ids]  = torch.ones(len(env_ids), 
-#                                 dtype=torch.float32,
-#                                 device=env.device)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']*CONFIG['env_config']['LEN_S_IDX']    
-    
-def reset_root_state_start_idx(
-    env: ManagerBasedEnv,
-    env_ids: torch.Tensor,
-    # valid_posns_and_rots: dict[str, tuple[float, float]],
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-):
-    # access the used quantities (to enable type-hinting)
-    asset: RigidObject | Articulation = env.scene[asset_cfg.name]
-    terrain: TerrainImporter = env.scene.terrain
-
-    if not hasattr(env, '_map_levels'):
-        env._map_levels = torch.zeros(env.num_envs, 
-                                    dtype=torch.long,
-                                    device=env.device)
-        
-    env._map_levels[env_ids] = torch.tensor(np.floor(np.random.rand(len(env_ids))*len(env.cfg.scene.terrain.traversability_hashmap_list)), device = env.device, dtype=torch.long)
-
-    # valid_poses = terrain.cfg.generate_poses_from_init_points(env, env_ids)
-    valid_poses, current_idx_np = terrain.cfg.generate_start_idx_poses(env=env, env_ids=env_ids, num_poses=len(env_ids))
-    current_idx = torch.tensor(current_idx_np, dtype=torch.long, device=env.device)
-
-    # Tensorizes the valid poses
-    posns = torch.stack(list(map(lambda x: torch.tensor(x.pos, device=env.device), valid_poses))).float()
-    oris = list(map(lambda x: torch.deg2rad(torch.tensor(x.rot_euler_xyz_deg, device=env.device)), valid_poses))
-    oris = torch.stack([math_utils.quat_from_euler_xyz(*ori) for ori in oris]).float()
-    lin_vels = torch.stack(list(map(lambda x: torch.tensor(x.lin_vel, device=env.device), valid_poses))).float()
-    ang_vels = torch.stack(list(map(lambda x: torch.tensor(x.ang_vel, device=env.device), valid_poses))).float()
-
-    positions = posns
-    positions += asset.data.default_root_state[env_ids, :3]
-    orientations = oris
-
-    lin_vels = lin_vels
-    lin_vels += asset.data.default_root_state[env_ids, 7:10]
-    ang_vels = ang_vels
-    ang_vels += asset.data.default_root_state[env_ids, 10:13]
-
-    # set into the physics simulation
-    asset.write_root_pose_to_sim(torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
-    asset.write_root_velocity_to_sim(torch.cat([lin_vels, ang_vels], dim=-1), env_ids=env_ids)
-
-    if not hasattr(env, '_initial_waypoint_indices'):
-        env._initial_waypoint_indices = torch.zeros(env.num_envs, 
-                                                dtype=torch.long,
-                                                device=env.device)
-        
-    if not hasattr(env, '_reset_env_bool'):
-        env._reset_env_bool = torch.ones(  # Tracks where to insert the next index
-            env.num_envs,
-            dtype=torch.bool,
-            device=env.device
-        )
-
-    if not hasattr(env, '_progress_history_indices'):
-        env._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']  # Store last 10 waypoints
-        env._progress_history_indices = torch.zeros(
-            (env.num_envs, env._progress_history_length), 
-            dtype=torch.long,
-            device=env.device
-        )
-
-    if not hasattr(env, '_action_history'):
-        env.action_history_length = CONFIG['env_config']['ACTION_HISTORY_LENGTH']  # Store last 10 waypoints
-        env._action_history = torch.zeros(
-            (env.num_envs, env.action_history_length, 2), 
-            dtype=torch.float32,
-            device=env.device
-        )
-
-    if not hasattr(env, '_obs_history_length'):
-        env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
-        
-    if not hasattr(env, '_base_lin_vel_x_history'):
-        env._base_lin_vel_x_history = torch.zeros(
-            (env.num_envs, env._obs_history_length), 
-            dtype=torch.float32,
-            device=env.device
-        )
-
-    if not hasattr(env, '_base_lin_vel_y_history'):
-        env._base_lin_vel_y_history = torch.zeros(
-            (env.num_envs, env._obs_history_length), 
-            dtype=torch.float32,
-            device=env.device
-        )
-
-    if not hasattr(env, '_base_ang_vel_z_history'):
-        env._base_ang_vel_z_history = torch.zeros(
-            (env.num_envs, env._obs_history_length), 
-            dtype=torch.float32,
-            device=env.device
-        )
+def _init_opponent_histories(env: ManagerBasedEnv, env_ids: torch.Tensor, ego_current_idx, opp_current_idx):
+    """Initialize and reset opponent-specific histories."""
+    if not hasattr(env, '_prev_delta_s_opp_ego'):
+        env._prev_delta_s_opp_ego = torch.ones(
+            env.num_envs, dtype=torch.float32, device=env.device
+        ) * CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX_MAX'] * CONFIG['env_config']['LEN_S_IDX']
 
     if not hasattr(env, '_traversability_history'):
         env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
         env._traversability_history = torch.ones(
-            (env.num_envs, env._rew_history_length), 
+            (env.num_envs, env._rew_history_length),
             dtype=torch.long,
-            device=env.device
+            device=env.device,
         )
 
-    if not hasattr(env, '_target_velocity_history'):
-        env._target_velocity_history = torch.zeros(
+    # Opponent dynamic properties
+    if not hasattr(env, '_opponent_type'):
+        env._opponent_type = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+    if not hasattr(env, '_opponent_vel_scaling'):
+        env._opponent_vel_scaling = torch.ones(env.num_envs, dtype=torch.float16, device=env.device)
+    if not hasattr(env, '_opponent_trajectory_alpha'):
+        env._opponent_trajectory_alpha = torch.ones(env.num_envs, dtype=torch.float16, device=env.device)
+    if not hasattr(env, '_opponent_overtaken_bool'):
+        env._opponent_overtaken_bool = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    if not hasattr(env, '_opponent_speed'):
+        env._opponent_speed = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
+    if not hasattr(env, '_opponent_d_dot'):
+        env._opponent_d_dot = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
+    if not hasattr(env, '_opponent_heading'):
+        env._opponent_heading = torch.zeros(env.num_envs, dtype=torch.float32, device=env.device)
+    if not hasattr(env, '_opponent_always_ahead'):
+        env._opponent_always_ahead = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    if not hasattr(env, '_opponent_collision_history'):
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
+        env._opponent_collision_history = torch.zeros(
+            (env.num_envs, env._rew_history_length),
+            dtype=torch.long,
+            device=env.device,
+        )
+    if not hasattr(env, '_s_idx_diff_history'):
+        env._s_idx_diff_history = torch.zeros((env.num_envs, env._obs_history_length), dtype=torch.float32, device=env.device)
+    if not hasattr(env, '_d_diff_history'):
+        env._d_diff_history = torch.zeros((env.num_envs, env._obs_history_length), dtype=torch.float32, device=env.device)
+    if not hasattr(env, '_vx_diff_history'):
+        env._vx_diff_history = torch.zeros((env.num_envs, env._obs_history_length), dtype=torch.float32, device=env.device)
+    if not hasattr(env, '_heading_diff_history'):
+        env._heading_diff_history = torch.zeros((env.num_envs, env._obs_history_length), dtype=torch.float32, device=env.device)
+    if not hasattr(env, '_cross_pos_history'):
+        env._cross_pos_history = torch.zeros((env.num_envs, env._obs_history_length), dtype=torch.float32, device=env.device)
+    if not hasattr(env, '_gap_inner_history'):
+        env._gap_inner_history = torch.zeros((env.num_envs, env._obs_history_length), dtype=torch.float32, device=env.device)
+    if not hasattr(env, '_gap_outer_history'):
+        env._gap_outer_history = torch.zeros((env.num_envs, env._obs_history_length), dtype=torch.float32, device=env.device)
+        
+    if not hasattr(env, '_opponent_overtaken_history'):
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
+        env._opponent_overtaken_history = torch.zeros(
+            (env.num_envs, env._rew_history_length),
+            dtype=torch.long,
+            device=env.device,
+        )    
+    if not hasattr(env, '_opponent_overtaken_counter'):
+        env._opponent_overtaken_counter = 0
+        env._opponent_collision_counter = 0
+        env._wall_collision_counter = 0
+
+        env._opponent_vel_scaling_lvl = CONFIG['env_config']['OPP_INIT_VEL_SCALING']
+        
+    if not hasattr(env, '_opponent_s_history'):
+        env._opponent_s_history = torch.zeros(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )
+    if not hasattr(env, '_opponent_d_history'):
+        env._opponent_d_history = torch.zeros(
             (env.num_envs, env._obs_history_length), 
             dtype=torch.float32,
             device=env.device
         )
         
-    # set boolean so that it knows it just resetted
-    env._initial_waypoint_indices[env_ids] = current_idx.clone()  
-    env._reset_env_bool[env_ids] = torch.ones(len(env_ids), dtype=bool, device=env.device)
-    env._progress_history_indices[env_ids, :] =  torch.zeros(env._progress_history_length, dtype=torch.long, device=env.device)
-    env._action_history[env_ids, :, :] = torch.zeros((len(env_ids), env._action_history_length, 2), dtype=torch.float32, device=env.device)
+    # Reset for this batch
+    env._prev_delta_s_opp_ego[env_ids]  = torch.ones(len(env_ids), dtype=torch.float32, device=env.device)*opp_current_idx*CONFIG['env_config']['LEN_S_IDX']  
+    env._opponent_type[env_ids] = torch.tensor(
+        np.floor(np.random.rand(len(env_ids)) * 3),
+        device=env.device,
+        dtype=torch.long,
+    )
 
-    env._base_lin_vel_x_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
-    env._base_lin_vel_y_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
-    env._base_ang_vel_z_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
-    env._target_velocity_history[env_ids, :] = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
+    env._opponent_vel_scaling[env_ids] = torch.normal(
+        mean=torch.ones(len(env_ids), dtype=torch.float16, device=env.device) * env._opponent_vel_scaling_lvl,
+        std=CONFIG['env_config']['OPP_STD_VEL_SCALING'],
+    ).clamp(min=CONFIG['env_config']['OPP_MIN_VEL_SCALING'], max=env._opponent_vel_scaling_lvl)
 
-    env._traversability_history[env_ids, :] = torch.ones((len(env_ids), env._rew_history_length), dtype=torch.long, device=env.device)
+    # define type of trajectory (defined, generalized)
+    if CONFIG['env_config']['OPP_GENERALIZATION']:
+        env._opponent_trajectory_alpha[env_ids] = torch.tensor(
+            np.random.rand(len(env_ids)),
+            device=env.device,
+            dtype=torch.float16,
+        )
+    else:
+        env._opponent_trajectory_alpha[env_ids] = torch.ones(len(env_ids), dtype=torch.float16, device=env.device)
+
+
+    env._opponent_overtaken_bool[env_ids]        = torch.zeros(len(env_ids), dtype=bool, device=env.device)
+    env._opponent_speed[env_ids]                 = torch.zeros(len(env_ids), dtype=torch.float32, device=env.device)
+    env._opponent_d_dot[env_ids]                 = torch.zeros(len(env_ids), dtype=torch.float32, device=env.device)
+    env._opponent_heading[env_ids]               = torch.zeros(len(env_ids), dtype=torch.float32, device=env.device)
+    env._opponent_always_ahead[env_ids]          = torch.rand(len(env_ids), device=env.device) < CONFIG['env_config']['OPPONENT_ALWAYS_AHEAD_PERCENTAGE']
+    env._opponent_collision_history[env_ids, :]  = torch.zeros((len(env_ids), env._rew_history_length), dtype=torch.long, device=env.device)
+    env._opponent_overtaken_history[env_ids, :]  = torch.zeros((len(env_ids), env._rew_history_length), dtype=torch.long, device=env.device)
+    env._s_idx_diff_history[env_ids, :]          = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
+    env._d_diff_history[env_ids, :]              = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
+    env._vx_diff_history[env_ids, :]             = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
+    env._heading_diff_history[env_ids, :]        = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
+    env._cross_pos_history[env_ids, :]           = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
+    env._gap_inner_history[env_ids, :]           = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
+    env._gap_outer_history[env_ids, :]           = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
+    env._opponent_s_history[env_ids, :]          = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
+    env._opponent_d_history[env_ids, :]          = torch.zeros((len(env_ids), env._obs_history_length), dtype=torch.float32, device=env.device)
+
+
+
+# ---------------------------------------------------------------------------
+# Public functions
+# ---------------------------------------------------------------------------
+
+def reset_root_state_random(env: ManagerBasedEnv, env_ids: torch.Tensor, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")):
+    asset: RigidObject | Articulation = env.scene[asset_cfg.name]
+    terrain: TerrainImporter = env.scene.terrain
+
+    _init_common_histories(env)
+
+    valid_poses, current_idx_np = terrain.cfg.generate_random_poses_from_waypoints(
+        env=env, env_ids=env_ids, num_poses=len(env_ids), max_radius_offset=0.5
+    )
+    current_idx = torch.tensor(current_idx_np, dtype=torch.long, device=env.device)
+
+    _reset_ego_state(env, env_ids, asset, valid_poses, current_idx)
+
+
+def reset_root_state_random_with_opponent(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    opponent_asset_cfg: SceneEntityCfg = SceneEntityCfg("opponent"),
+):
+    asset: RigidObject | Articulation = env.scene[asset_cfg.name]
+    opponent_asset: RigidObject | Articulation = env.scene[opponent_asset_cfg.name]
+    terrain: TerrainImporter = env.scene.terrain
+
+    _init_common_histories(env)
+
+    ego_valid_poses, ego_idx_np, opp_valid_poses, opp_idx_np = terrain.cfg.generate_random_poses_from_waypoints_with_opponent(
+        env=env, env_ids=env_ids, num_poses=len(env_ids), max_radius_offset=0.5
+    )
+    current_idx = torch.tensor(ego_idx_np, dtype=torch.long, device=env.device)
+    opp_current_idx = torch.tensor(opp_idx_np, dtype=torch.long, device=env.device)
+    
+    _reset_ego_state(env, env_ids, asset, ego_valid_poses, current_idx)
+    _reset_opponent_state(env, env_ids, opponent_asset, opp_valid_poses)
+    _init_opponent_histories(env, env_ids, current_idx, opp_current_idx)
+
+def reset_root_state_start_idx(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+):
+    """Reset the ego agent at specific start indices (deterministic)."""
+    asset: RigidObject | Articulation = env.scene[asset_cfg.name]
+    terrain: TerrainImporter = env.scene.terrain
+
+    # 1. Ensure histories exist
+    _init_common_histories(env)
+
+    # 2. Sample poses from start indices
+    valid_poses, current_idx_np = terrain.cfg.generate_start_idx_poses(
+        env=env, env_ids=env_ids, num_poses=len(env_ids)
+    )
+    current_idx = torch.tensor(current_idx_np, dtype=torch.long, device=env.device)
+
+    # 3. Reset ego (robot) state
+    _reset_ego_state(env, env_ids, asset, valid_poses, current_idx)
+
+    # Reset those for selected envs
+    env._total_progress_indices[env_ids] = torch.zeros(
+        len(env_ids), dtype=torch.long, device=env.device
+    )
 
 def move_opponent_s_based(
     env: ManagerBasedEnv,
@@ -633,7 +359,31 @@ def move_opponent_s_based(
             torch.tensor(sp, device=env.device, dtype=torch.float32)
             for sp in env.scene.terrain.cfg.opp_traj_sp_list
         ]
-        
+
+    num_episodes = env.common_step_counter // env.max_episode_length
+    if env.common_step_counter % 250 == 0:
+        if (env._opponent_overtaken_counter/(env._opponent_collision_counter+env._opponent_overtaken_counter+env._wall_collision_counter+1))> CONFIG['env_config']['OT_COLLISION_RATIO_LVL_UP']:
+            env._opponent_vel_scaling_lvl += CONFIG['env_config']['OPP_VEL_SCALING_INCREMENT']
+            env._opponent_overtaken_counter = 0
+            env._opponent_collision_counter = 0
+            env._wall_collision_counter = 0
+        elif (env._opponent_overtaken_counter/(env._opponent_collision_counter+env._opponent_overtaken_counter+env._wall_collision_counter+1))< CONFIG['env_config']['OT_COLLISION_RATIO_LVL_DOWN']: 
+            env._opponent_overtaken_counter = 0
+            env._opponent_collision_counter = 0
+            env._wall_collision_counter = 0
+            env._opponent_vel_scaling_lvl -= CONFIG['env_config']['OPP_VEL_SCALING_DECREASE']
+        else:
+            env._opponent_overtaken_counter = 0
+            env._opponent_collision_counter = 0
+            env._wall_collision_counter = 0
+            
+    env._opponent_vel_scaling_lvl = max(env._opponent_vel_scaling_lvl, CONFIG['env_config']['OPP_MIN_VEL_SCALING'])
+    
+    if env.common_step_counter % 500 == 0:
+        env._opponent_overtaken_counter = 0
+        env._opponent_collision_counter = 0
+        env._wall_collision_counter = 0
+    
     asset = env.scene[asset_cfg.name]
     ego_position_xy = mdp.root_pos_w(env=env, asset_cfg=SceneEntityCfg("robot"))[:, :2]
     opp_position_xy = mdp.root_pos_w(env=env, asset_cfg=SceneEntityCfg("opponent"))[:, :2]
@@ -659,110 +409,187 @@ def move_opponent_s_based(
         level_opp_types = opponent_types[map_mask]
         unique_opp_types = torch.unique(level_opp_types)
         
-        for opp_type in unique_opp_types:
-            type_mask = (level_opp_types == opp_type)
-            if not type_mask.any():
-                continue
-            combined_mask = map_mask & (opponent_types == opp_type)
+        if CONFIG['env_config']['OPP_GENERALIZATION']:
 
-            # Select two base trajectories to blend
-            if opp_type == 0:  # Centerline dominant
-                traj_a = env._opp_traj_center_list[map_level]
-                traj_b = env._opp_traj_iqp_list[map_level]
-            elif opp_type == 1:  # IQP dominant
-                traj_a = env._opp_traj_iqp_list[map_level]
-                traj_b = env._opp_traj_sp_list[map_level]
-            elif opp_type == 2:  # SP dominant
-                traj_a = env._opp_traj_sp_list[map_level]
-                traj_b = env._opp_traj_center_list[map_level]
+            for opp_type in unique_opp_types:
+                type_mask = (level_opp_types == opp_type)
+                if not type_mask.any():
+                    continue
+                combined_mask = map_mask & (opponent_types == opp_type)
+
+                # Select two base trajectories to blend
+                
+                if opp_type == 0:  # Centerline dominant
+                    traj_a = env._opp_traj_center_list[map_level]
+                    traj_b = env._opp_traj_iqp_list[map_level]
+                elif opp_type == 1:  # IQP dominant
+                    traj_a = env._opp_traj_iqp_list[map_level]
+                    traj_b = env._opp_traj_sp_list[map_level]
+                elif opp_type == 2:  # SP dominant
+                    traj_a = env._opp_traj_sp_list[map_level]
+                    traj_b = env._opp_traj_center_list[map_level]
+                else:
+                    raise ValueError(f"Unknown opponent type: {opp_type}")
+
+                # Split into components
+                traj_a_xy, traj_a_psi, traj_a_vel = traj_a[:, :2], traj_a[:, 2], traj_a[:, 3]
+                traj_b_xy, traj_b_psi, traj_b_vel = traj_b[:, :2], traj_b[:, 2], traj_b[:, 3]
+
+                # Find closest indices for ego (used to place opponent ahead if needed)
+                ego_idx_a, _ = find_frenet_coord_along_waypoints(traj_a_xy, ego_position_xy[combined_mask])
+                ego_idx_b, _ = find_frenet_coord_along_waypoints(traj_b_xy, ego_position_xy[combined_mask])
+
+                # Find closest indices for opponent
+                opp_idx_a, _ = find_frenet_coord_along_waypoints(traj_a_xy, opp_position_xy[combined_mask])
+                opp_idx_b, _ = find_frenet_coord_along_waypoints(traj_b_xy, opp_position_xy[combined_mask])
+
+                # Compute move steps separately
+                move_steps_a = (traj_a_vel[opp_idx_a] * CONFIG['env_config']['OPP_MOVE_DT'] * 
+                            (env._opponent_vel_scaling[combined_mask])/CONFIG['env_config']['LEN_S_IDX']).int()
+                move_steps_b = (traj_b_vel[opp_idx_b] * CONFIG['env_config']['OPP_MOVE_DT'] * 
+                            (env._opponent_vel_scaling[combined_mask])/CONFIG['env_config']['LEN_S_IDX']).int()
+
+                # Next indices depending on "always ahead"
+                next_idx_a = torch.where(
+                                        env._opponent_always_ahead[combined_mask],
+                                        (ego_idx_a + CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX_MIN']) % len(traj_a_xy),
+                                            torch.where(env.episode_length_buf[combined_mask] <CONFIG['env_config']['OPPONENT_STARTS_MOVING_AFTER_STEP'], 
+                                            opp_idx_a, 
+                                            (opp_idx_a + move_steps_a + np.random.randint(low=1, high=2)) % len(traj_a_xy)
+                                        )
+                                        )
+                
+
+                next_idx_b = torch.where(
+                                        env._opponent_always_ahead[combined_mask],
+                                        (ego_idx_b + CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX_MIN']) % len(traj_b_xy),
+                                            torch.where(env.episode_length_buf[combined_mask] < CONFIG['env_config']['OPPONENT_STARTS_MOVING_AFTER_STEP'], 
+                                            opp_idx_b, 
+                                            (opp_idx_b + move_steps_b + np.random.randint(low=1, high=2)) % len(traj_b_xy)
+                                        )
+                                        )       
+
+                
+                
+                # Candidate next states
+                pos_a = traj_a_xy[next_idx_a]
+                pos_b = traj_b_xy[next_idx_b]
+                psi_a = traj_a_psi[next_idx_a]
+                psi_b = traj_b_psi[next_idx_b]
+                vel_a = traj_a_vel[next_idx_a]
+                vel_b = traj_b_vel[next_idx_b]
+
+                # Blend with alpha
+                alpha = env._opponent_trajectory_alpha[combined_mask].unsqueeze(-1)
+                blended_pos = alpha * pos_a + (1 - alpha) * pos_b
+
+                heading_a = torch.stack([torch.cos(psi_a), torch.sin(psi_a)], dim=-1)
+                heading_b = torch.stack([torch.cos(psi_b), torch.sin(psi_b)], dim=-1)
+                blended_heading = alpha * heading_a + (1 - alpha) * heading_b
+                blended_psi = torch.atan2(blended_heading[:,1], blended_heading[:,0])
+
+                # blended_vel = (alpha.squeeze() * vel_a + (1 - alpha.squeeze()) * vel_b)
+
+                # Update positions (X,Y only; preserve Z)
+                new_positions[combined_mask, 0] = blended_pos[:,0] + env.scene.env_origins[combined_mask, 0] + torch.rand_like(blended_pos[:,0])*0.05
+                new_positions[combined_mask, 1] = blended_pos[:,1] + env.scene.env_origins[combined_mask, 1] + torch.rand_like(blended_pos[:,1])*0.05
+
+                # Compute speed as displacement / dt
+                disp = blended_pos - opp_position_xy[combined_mask]
+                env._opponent_speed[combined_mask] = torch.norm(disp, dim=1) / CONFIG['env_config']['OPP_MOVE_DT']
+
+                # Heading from displacement (safer than blended heading if you want kinematics)
+                env._opponent_heading[combined_mask] = torch.atan2(disp[:,1], disp[:,0])
+
+                # TODO: if you want to update _opponent_d_dot, you’d need to project blended_pos into Frenet coords too
+
+                # Convert yaw to quaternion (for now keep simple, identity rotation in x/y)
+                new_orientations[combined_mask] = torch.stack([
+                    torch.cos(blended_psi/2.0),   # w
+                    torch.zeros_like(blended_psi),# x
+                    torch.zeros_like(blended_psi),# y
+                    torch.sin(blended_psi/2.0)    # z
+                ], dim=1)
+                
+        else:
+            # Opponent always follows the IQP trajectory
+            if CONFIG['env_config']['OPP_TRAJ'] == "mincurv":
+                traj = env._opp_traj_iqp_list[map_level]
+            elif CONFIG['env_config']['OPP_TRAJ'] == "sp":
+                traj = env._opp_traj_sp_list[map_level]
+            elif CONFIG['env_config']['OPP_TRAJ'] == "centerline":
+                traj = env._opp_traj_centerline_list[map_level]                
             else:
-                raise ValueError(f"Unknown opponent type: {opp_type}")
+                traj = env._opp_traj_iqp_list[map_level]
+                
+            traj_xy, traj_psi, traj_vel = traj[:, :2], traj[:, 2], traj[:, 3]
 
-            # Split into components
-            traj_a_xy, traj_a_psi, traj_a_vel = traj_a[:, :2], traj_a[:, 2], traj_a[:, 3]
-            traj_b_xy, traj_b_psi, traj_b_vel = traj_b[:, :2], traj_b[:, 2], traj_b[:, 3]
+            # Closest indices for ego and opponent
+            ego_idx, _ = find_frenet_coord_along_waypoints(traj_xy, ego_position_xy[map_mask])
+            opp_idx, _ = find_frenet_coord_along_waypoints(traj_xy, opp_position_xy[map_mask])
 
-            # Find closest indices for ego (used to place opponent ahead if needed)
-            ego_idx_a, _ = find_frenet_coord_along_waypoints(traj_a_xy, ego_position_xy[combined_mask])
-            ego_idx_b, _ = find_frenet_coord_along_waypoints(traj_b_xy, ego_position_xy[combined_mask])
+            # Compute move steps
+            move_steps = (
+                traj_vel[opp_idx] 
+                * CONFIG['env_config']['OPP_MOVE_DT'] 
+                * (env._opponent_vel_scaling[map_mask]) 
+                / CONFIG['env_config']['LEN_S_IDX']
+            ).int()
 
-            # Find closest indices for opponent
-            opp_idx_a, _ = find_frenet_coord_along_waypoints(traj_a_xy, opp_position_xy[combined_mask])
-            opp_idx_b, _ = find_frenet_coord_along_waypoints(traj_b_xy, opp_position_xy[combined_mask])
+            # Next index: if always ahead, place at fixed offset; else advance along trajectory
+            next_idx = torch.where(
+                env._opponent_always_ahead[map_mask],
+                (ego_idx + CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX_MIN']) % len(traj_xy),
+                torch.where(
+                    env.episode_length_buf[map_mask] < CONFIG['env_config']['OPPONENT_STARTS_MOVING_AFTER_STEP'],
+                    opp_idx,
+                    (opp_idx + move_steps + np.random.randint(low=1, high=2)) % len(traj_xy)
+                )
+            )
 
-            # Compute move steps separately
-            move_steps_a = (traj_a_vel[opp_idx_a] * CONFIG['env_config']['OPP_MOVE_DT'] * 
-                           (CONFIG['env_config']['OPP_MIN_VEL_SCALING'] + env._opponent_vel_scaling[combined_mask])/CONFIG['env_config']['LEN_S_IDX']).int()
-            move_steps_b = (traj_b_vel[opp_idx_b] * CONFIG['env_config']['OPP_MOVE_DT'] * 
-                           (CONFIG['env_config']['OPP_MIN_VEL_SCALING'] + env._opponent_vel_scaling[combined_mask])/CONFIG['env_config']['LEN_S_IDX']).int()
+            # Candidate next state
+            pos = traj_xy[next_idx]
+            psi = traj_psi[next_idx]
+            vel = traj_vel[next_idx]
 
-            # Next indices depending on "always ahead"
-            next_idx_a = torch.where(
-                                    env._opponent_always_ahead[combined_mask],
-                                    (ego_idx_a + CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']) % len(traj_a_xy),
-                                        torch.where(env.episode_length_buf[combined_mask] < 15, 
-                                        opp_idx_a, 
-                                        (opp_idx_a + move_steps_a + np.random.randint(low=1, high=2)) % len(traj_a_xy)
-                                    )
-                                    )
-            
+            # Update positions (XY only, preserve Z offset + small jitter)
+            new_positions[map_mask, 0] = pos[:, 0] + env.scene.env_origins[map_mask, 0] + torch.rand_like(pos[:, 0]) * 0.05
+            new_positions[map_mask, 1] = pos[:, 1] + env.scene.env_origins[map_mask, 1] + torch.rand_like(pos[:, 1]) * 0.05
 
-            next_idx_b = torch.where(
-                                    env._opponent_always_ahead[combined_mask],
-                                    (ego_idx_b + CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']) % len(traj_b_xy),
-                                        torch.where(env.episode_length_buf[combined_mask] < 15, 
-                                        opp_idx_b, 
-                                        (opp_idx_b + move_steps_b + np.random.randint(low=0, high=2)) % len(traj_b_xy)
-                                    )
-                                    )       
+            # Speed as displacement / dt
+            disp = pos - opp_position_xy[map_mask]
+            env._opponent_speed[map_mask] = torch.norm(disp, dim=1) / CONFIG['env_config']['OPP_MOVE_DT']
 
-            
-            
-            # Candidate next states
-            pos_a = traj_a_xy[next_idx_a]
-            pos_b = traj_b_xy[next_idx_b]
-            psi_a = traj_a_psi[next_idx_a]
-            psi_b = traj_b_psi[next_idx_b]
-            vel_a = traj_a_vel[next_idx_a]
-            vel_b = traj_b_vel[next_idx_b]
+            # Heading from displacement
+            env._opponent_heading[map_mask] = torch.atan2(disp[:, 1], disp[:, 0])
 
-            # Blend with alpha
-            alpha = env._opponent_trajectory_alpha[combined_mask].unsqueeze(-1)
-            blended_pos = alpha * pos_a + (1 - alpha) * pos_b
-
-            heading_a = torch.stack([torch.cos(psi_a), torch.sin(psi_a)], dim=-1)
-            heading_b = torch.stack([torch.cos(psi_b), torch.sin(psi_b)], dim=-1)
-            blended_heading = alpha * heading_a + (1 - alpha) * heading_b
-            blended_psi = torch.atan2(blended_heading[:,1], blended_heading[:,0])
-
-            # blended_vel = (alpha.squeeze() * vel_a + (1 - alpha.squeeze()) * vel_b)
-
-            # Update positions (X,Y only; preserve Z)
-            new_positions[combined_mask, 0] = blended_pos[:,0] + env.scene.env_origins[combined_mask, 0] + torch.rand_like(blended_pos[:,0])*0.05
-            new_positions[combined_mask, 1] = blended_pos[:,1] + env.scene.env_origins[combined_mask, 1] + torch.rand_like(blended_pos[:,1])*0.05
-
-            # Compute speed as displacement / dt
-            disp = blended_pos - opp_position_xy[combined_mask]
-            env._opponent_speed[combined_mask] = torch.norm(disp, dim=1) / CONFIG['env_config']['OPP_MOVE_DT']
-
-            # Heading from displacement (safer than blended heading if you want kinematics)
-            env._opponent_heading[combined_mask] = torch.atan2(disp[:,1], disp[:,0])
-
-            # TODO: if you want to update _opponent_d_dot, you’d need to project blended_pos into Frenet coords too
-
-            # Convert yaw to quaternion (for now keep simple, identity rotation in x/y)
-            new_orientations[combined_mask] = torch.stack([
-                torch.cos(blended_psi/2.0),   # w
-                torch.zeros_like(blended_psi),# x
-                torch.zeros_like(blended_psi),# y
-                torch.sin(blended_psi/2.0)    # z
+            # Orientation quaternion (yaw only)
+            new_orientations[map_mask] = torch.stack([
+                torch.cos(psi / 2.0),           # w
+                torch.zeros_like(psi),          # x
+                torch.zeros_like(psi),          # y
+                torch.sin(psi / 2.0)            # z
             ], dim=1)
-    
+        
     # Apply all updates at once
     asset.write_root_pose_to_sim(
         torch.cat([new_positions, new_orientations], dim=1), 
         env_ids=env_ids
     )
+
+# def opponent_vel_scaling_level_up(
+#         env: ManagerBasedEnv,
+#         env_ids: torch.Tensor,
+#         asset_cfg: SceneEntityCfg = SceneEntityCfg("opponent")
+#         ):
+            
+#         if (env._opponent_overtaken_counter/(env._opponent_collision_counter+env._opponent_overtaken_counter+env._wall_collision_counter+1))> CONFIG['env_config']['OT_COLLISION_RATIO_LVL_UP']:
+#             env._opponent_vel_scaling_lvl += 0.1
+        
+#         env._opponent_overtaken_counter = 0
+#         env._opponent_collision_counter = 0
+#         env._wall_collision_counter = 0
+    
     
 # def enhanced_braking(
 #     env: ManagerBasedEnv,

@@ -21,7 +21,7 @@ gym.register(
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point":F1TenthTimeTrialRLEnvCfg,
-        "rsl_rl_cfg_entry_point": f"{f1tenth_agents.__name__}.rsl_rl_ppo_cfg:F1TenthPPORunnerCfg",
+        "rsl_rl_cfg_entry_point": f"{f1tenth_agents.__name__}.rsl_rl_ppo_cfg:F1TenthTimeTrialPPORunnerCfg",
         "play_env_cfg_entry_point": F1TenthTimeTrialPlayEnvCfg
     }
 )
@@ -33,7 +33,7 @@ gym.register(
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point":F1TenthOvertakeRLEnvCfg,
-        "rsl_rl_cfg_entry_point": f"{f1tenth_agents.__name__}.rsl_rl_ppo_cfg:F1TenthPPORunnerCfg",
+        "rsl_rl_cfg_entry_point": f"{f1tenth_agents.__name__}.rsl_rl_ppo_cfg:F1TenthOvertakePPORunnerCfg",
         "play_env_cfg_entry_point": F1TenthOvertakePlayEnvCfg
     }
 )

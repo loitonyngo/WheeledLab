@@ -12,6 +12,8 @@ def increase_reward_weight_over_time(
         env_ids: Sequence[int],
         reward_term_name : str,
         weight_increase : float,
+        max_weight: float = 100,
+        min_weight: float = 0,
         first_episode_increase : int = 1,
         episodes_per_increase : int = 1,
         max_num_increases: int = torch.inf,
@@ -68,3 +70,4 @@ def multiplier_reward_weight_over_time(
         term_cfg = env.reward_manager.get_term_cfg(reward_term_name)
         term_cfg.weight *= multiplier
         env.reward_manager.set_term_cfg(reward_term_name, term_cfg)
+        

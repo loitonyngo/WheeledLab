@@ -1,13 +1,13 @@
 # config.yaml
 env_config:
-  MAP_NAME_LIST: ['JED']
+  MAP_NAME_LIST: ['BAH']
   ORIGIN_LIST: [[0, 0], [0, 0], [0, 0], [0, 0]]
 
   # When comparing real data that don't use incremental it must always be set to False
   INCREMENTAL_MODE: True
-  MAX_SPEED_INCREMENT: 0.13
+  MAX_SPEED_INCREMENT: 0.12
   MAX_SPEED_SCALING: 8
-  MAX_STEERING_SCALING: 0.42
+  MAX_STEERING_SCALING: 0.38
   SPEED_OFFSET: 0
   STEERING_OFFSET: 0.0
   VD_ENHANCED: False
@@ -27,7 +27,7 @@ env_config:
   # SIM_DT: Physics simulation time step
   # SIM_DECIMATION: Number of physics steps per simulation step; 
   # The actions, observations, and rewards are computed every SIM_DECIMATION steps, and every SIM_DECIMATION*SIM_DT seconds.
-  EPISODE_LENGTH_S: 10
+  EPISODE_LENGTH_S: 30
   SIM_DT: 0.00625
   SIM_DECIMATION: 8
   # SIM_DT: 0.01
@@ -40,38 +40,56 @@ env_config:
   MAX_DELAY_STEERING: 24
   MIN_DELAY_THROTTLE: 8 #sim dt steps
   MAX_DELAY_THROTTLE: 8
-  # MIN_DELAY_STEERING: 0 #sim dt steps
-  # MAX_DELAY_STEERING: 0
-  # MIN_DELAY_THROTTLE: 0 #sim dt steps
-  # MAX_DELAY_THROTTLE: 0
 
-  # PROGRESS_HISTORY_LENGTH: Number of last waypoints to store in the history buffer, every every SIM_DECIMATION*SIM_DT seconds.
+  # REWARD_HISTORY_LENGTH: Number of last waypoints to store in the history buffer, every every SIM_DECIMATION*SIM_DT seconds, useful if you want to delay the termination
   # PROGRESS_HISTORY_CHECKPOINT_IDX: Index of the last checkpoint in the history buffer used to compute the difference in progress
-  PROGRESS_HISTORY_LENGTH: 20
-  PROGRESS_HISTORY_CHECKPOINT_IDX: 4
 
-  ACTION_HISTORY_LENGTH: 4
-  OBS_HISTORY_LENGTH: 4
-  REW_HISTORY_LENGTH: 4
+  ACTION_HISTORY_LENGTH: 5
+  OBS_HISTORY_LENGTH: 5
+  REW_HISTORY_LENGTH: 50
+  PROGRESS_HISTORY_CHECK_IDX: 2
+  WALL_COLLISION_CHECK_IDX: 2
+  OPPONENT_COLLISION_CHECK_IDX: 5
+  OPPONENT_OVERTAKEN_CHECK_IDX: 40
 
+  # Min distance allowable to walls (otherwise collision)
   WALL_COLLISION_RADIUS: 0.28
   
+  # Max progress allowable (in idx), otherwise we consider it corner cutting
   MAX_PROGRESS_IDX: 30 
 
   # True if lookahed changes with current velocity
-  DYNAMIC_LOOKAHEAD: True
+  DYNAMIC_LOOKAHEAD: False
+  N_HORIZON: 20 # Number of waypoints for horizon
   T_HORIZON: 4
   # Otherwise use constant idx steps (s_horizon = delta_s_idx [0.1m/idx] * N_horizon_idx [idx])
   DELTA_S_IDX: 10
-  N_HORIZON: 20
 
-  OPP_SIZE_RADIUS: 0.18
-  OPP_MOVE_DT: 0.05
-  OPP_COLLISION_RADIUS: 0.4
-  OPP_VEL_SCALING: 0.5 # (vel scaling = 0.2 + OPP_VEL_SCALING)
+############### OPPONENT OVERTAKE
+  OPP_SIZE_RADIUS: 0.20
+  OPP_MOVE_DT: 0.1
+  OPP_COLLISION_RADIUS: 0.45
+  OPP_FRONT_COLLISION_RADIUS: 0.70
+  OPP_LAT_COLLISION_RADIUS: 0.45
+  CROSS_POS_LIM: 0.2
+
+  OPP_GENERALIZATION: False
+  OPP_TRAJ: "mincurv"
+  OPP_INIT_VEL_SCALING: 0.15
   OPP_MIN_VEL_SCALING: 0.2
-  OPPONENT_INIT_DISTANCE_IDX: 15
-  OPPONENT_FAR_AWAY_IDX: 40
+  OPP_STD_VEL_SCALING: 0.35
+  OPP_VEL_SCALING_INCREMENT: 0.1
+  OPP_VEL_SCALING_DECREASE: 0.05
+  OT_COLLISION_RATIO_LVL_UP: 0.51
+  OT_COLLISION_RATIO_LVL_DOWN: 0.31
+
+  OPPONENT_STARTS_MOVING_AFTER_STEP: 30
+  # OPPONENT_INIT_DISTANCE_IDX: 40
+  OPPONENT_INIT_DISTANCE_IDX_MAX: 70
+  OPPONENT_INIT_DISTANCE_IDX_MIN: 10
+  OPPONENT_FAR_AWAY_IDX: 70
   OPPONENT_OVERTAKEN_IDX: 5
+  OPPONENT_ALWAYS_AHEAD_PERCENTAGE: 0.01
+
   IGNORE_OPPONENT_UNTIL_EP: 0
   STATIC_OPPONENT_UNTIL_EP: 0

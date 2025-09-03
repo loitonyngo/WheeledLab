@@ -11,7 +11,7 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M")
 @configclass
 class RSS_TIMETRIAL(RslRlRunConfig):
     env_setup = EnvSetup(
-        num_envs=128,
+        num_envs=4096,
         env_spacing= 12,
         task_name="Isaac-F1TenthTimeTrialRL-v0"
     )
@@ -21,7 +21,7 @@ class RSS_TIMETRIAL(RslRlRunConfig):
         rl_algo_lib="rsl",
         rl_algo_class="ppo",
         log=LogConfig(
-            video_interval=50000,
+            video_interval=2500,
             run_name = timestamp
         ),
     )
@@ -42,7 +42,7 @@ class RSS_OVERTAKE(RslRlRunConfig):
         rl_algo_lib="rsl",
         rl_algo_class="ppo",
         log=LogConfig(
-            video_interval=50000,
+            video_interval=2000,
             run_name = timestamp
         ),
     )

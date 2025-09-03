@@ -94,11 +94,11 @@ def create_maps_from_waypoints(maps_folder_path, map_name_list, origin_list, sta
         )
         outer_usd = set_points_usd(
             data['outer'], map_name, 'outer', origin_list[i], 
-            stage, [(0.0, 0.0, 1.0)]
+            stage, [(0.0, 1.0, 0.0)]
         )
         inner_usd = set_points_usd(
             data['inner'], map_name, 'inner', origin_list[i], 
-            stage, [(0.0, 0.0, 1.0)]
+            stage, [(0.25, 1.0, 0.0)]
         )
 
         opp_traj_iqp_usd = set_points_usd(
@@ -475,7 +475,7 @@ def generate_random_poses_from_waypoints_with_opponent(env_ids, num_poses, map_l
         
         # Randomly select waypoints for each environment
         selected_indices = np.random.choice(num_waypoints, size=len(current_env_ids), replace=True)
-        opponent_selected_indices = (selected_indices + CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']) % num_waypoints
+        opponent_selected_indices = (selected_indices + np.random.randint(low=CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX_MIN'], high = CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX_MAX'], size=len(selected_indices))) % num_waypoints
         
         # Get the positions of the selected waypoints
         selected_waypoints = waypoints_xy[selected_indices]

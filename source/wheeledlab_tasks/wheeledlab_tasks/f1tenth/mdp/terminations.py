@@ -88,7 +88,48 @@ def wall_collision(env):
     env._wall_collision_history[:, 1:] = env._wall_collision_history[:, :-1].clone()
     env._wall_collision_history[:, 0] = collision_bool
     
-    return  env._wall_collision_history[:, -1].bool()
+    if not hasattr(env, '_opponent_overtaken_counter'):
+            env._opponent_overtaken_counter = 0
+            env._opponent_collision_counter = 0
+            env._wall_collision_counter = 0
+
+    env._wall_collision_counter +=  torch.sum(env._wall_collision_history[:, CONFIG['env_config']['WALL_COLLISION_CHECK_IDX']].float())
+
+    env.extras['log']['Info/wall_collision_counter'] = env._wall_collision_counter 
+    env.extras['log']['Info/wall_collision_step'] = torch.sum(env._wall_collision_history[:, CONFIG['env_config']['WALL_COLLISION_CHECK_IDX']].float())
+    
+    return  env._wall_collision_history[:, CONFIG['env_config']['WALL_COLLISION_CHECK_IDX']].bool()
+
+# def opponent_collision(env):
+#     num_episodes = env.common_step_counter // env.max_episode_length
+#     if num_episodes <  CONFIG['env_config']['IGNORE_OPPONENT_UNTIL_EP']:
+#         return torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
+    
+#     if not hasattr(env, '_prev_delta_s_opp_ego'):
+#         env._prev_delta_s_opp_ego = torch.ones(env.num_envs, 
+#                                 dtype=torch.float32,
+#                                 device=env.device)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX_MAX']*CONFIG['env_config']['LEN_S_IDX']
+        
+#     if not hasattr(env, '_opponent_collision_history'):
+#         env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
+#         env._opponent_collision_history = torch.zeros(
+#             (env.num_envs, env._rew_history_length), 
+#             dtype=torch.long,
+#             device=env.device
+#         )
+       
+#     ego_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("robot"))[..., :2]
+#     opp_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("opponent"))[:, :2]
+    
+#     dist = torch.norm(ego_position_xy - opp_position_xy, p=2, dim=1)
+#     opp_collision = dist < CONFIG['env_config']['OPP_COLLISION_RADIUS']
+
+#     env._opponent_collision_history[:, 1:] = env._opponent_collision_history[:, :-1].clone()
+#     env._opponent_collision_history[:, 0] = opp_collision
+    
+#     env._opponent_collision_counter +=  torch.sum(env._opponent_collision_history[:, CONFIG['env_config']['OPPONENT_COLLISION_CHECK_IDX']].float())
+    
+#     return env._opponent_collision_history[:, CONFIG['env_config']['OPPONENT_COLLISION_CHECK_IDX']].bool()
 
 def opponent_collision(env):
     num_episodes = env.common_step_counter // env.max_episode_length
@@ -98,7 +139,7 @@ def opponent_collision(env):
     if not hasattr(env, '_prev_delta_s_opp_ego'):
         env._prev_delta_s_opp_ego = torch.ones(env.num_envs, 
                                 dtype=torch.float32,
-                                device=env.device)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']*CONFIG['env_config']['LEN_S_IDX']
+                                device=env.device)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX_MAX']*CONFIG['env_config']['LEN_S_IDX']
         
     if not hasattr(env, '_opponent_collision_history'):
         env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
@@ -107,18 +148,32 @@ def opponent_collision(env):
             dtype=torch.long,
             device=env.device
         )
-  
+
+    if not hasattr(env, '_cross_pos_history'):
+        env._cross_pos_history = torch.zeros(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )     
         
+    # if crosspos < 0.25 distance collision smaller!
     ego_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("robot"))[..., :2]
     opp_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("opponent"))[:, :2]
     
     dist = torch.norm(ego_position_xy - opp_position_xy, p=2, dim=1)
-    opp_collision = dist < CONFIG['env_config']['OPP_COLLISION_RADIUS']
+    
+    opp_collision = torch.where(
+                                torch.mean(env._cross_pos_history[:, :], dim=1) <  CONFIG['env_config']['CROSS_POS_LIM'],
+                                dist < CONFIG['env_config']['OPP_FRONT_COLLISION_RADIUS'],
+                                dist < CONFIG['env_config']['OPP_LAT_COLLISION_RADIUS']
+    )
 
     env._opponent_collision_history[:, 1:] = env._opponent_collision_history[:, :-1].clone()
     env._opponent_collision_history[:, 0] = opp_collision
     
-    return env._opponent_collision_history[:, -1].bool()
+    env._opponent_collision_counter +=  torch.sum(env._opponent_collision_history[:, CONFIG['env_config']['OPPONENT_COLLISION_CHECK_IDX']].float())
+    
+    return env._opponent_collision_history[:, CONFIG['env_config']['OPPONENT_COLLISION_CHECK_IDX']].bool()
 
 def opponent_overtaken(env):
 
@@ -128,12 +183,25 @@ def opponent_overtaken(env):
 
     if not hasattr(env, '_opponent_overtaken_bool'):
        env._opponent_overtaken_bool = torch.zeros(
-            env.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            env.num_envs, 
             dtype=torch.bool,
             device=env.device
         )
+    if not hasattr(env, '_opponent_overtaken_counter'):
+       env._opponent_overtaken_counter = 0
        
-    return env._opponent_overtaken_bool
+    if not hasattr(env, '_opponent_overtaken_history'):
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
+        env._opponent_overtaken_history = torch.zeros(
+            (env.num_envs, env._rew_history_length),
+            dtype=torch.long,
+            device=env.device,
+        )
+        
+    overtake_completed = env._opponent_overtaken_history.min(dim=1).values == 1
+    env._opponent_overtaken_counter += torch.sum(overtake_completed.float())
+    
+    return overtake_completed
 
 def far_from_opponent(    
         env: ManagerBasedEnv, 
@@ -192,3 +260,39 @@ def far_from_opponent(
                                                     torch.zeros_like(delta_s_opp_ego, dtype=torch.bool))  
         
     return far_from_opponent_bool.bool()
+
+def time_out(env: ManagerBasedEnv) -> torch.Tensor:
+    """Terminate the episode when the episode length exceeds the maximum episode length."""
+    return env.episode_length_buf >= env.max_episode_length
+
+def lap_completed(env):
+    pos_xy_world = mdp.root_pos_w(env)[..., :2]
+
+    if not hasattr(env, '_total_progress_indices'):
+        env._total_progress_indices = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+                  
+    # Get map levels for all environments
+    map_levels = env._map_levels  # shape: [num_envs]
+    unique_map_levels = torch.unique(map_levels)
+
+    lap_completed_bool = torch.zeros(env.num_envs, 
+                                dtype=torch.bool,
+                                device=env.device)
+    
+    for map_level in unique_map_levels:
+        # Create mask for environments using this map
+        env_mask = (map_levels == map_level)
+        num_envs_in_map = env_mask.sum()
+        
+        if num_envs_in_map == 0:
+            continue
+            
+        # Get positions for these environments
+        waypoints_world = env._waypoints_list[map_level][:, :2]
+        num_waypoints_lap_completed = len(waypoints_world)+10
+
+        lap_completed_bool[env_mask] = torch.where((env._total_progress_indices[env_mask] > num_waypoints_lap_completed),
+                                                   torch.ones(env.num_envs, dtype=torch.bool, device=env.device),
+                                                   torch.zeros(env.num_envs, dtype=torch.bool, device=env.device))
+        
+    return  lap_completed_bool.bool()

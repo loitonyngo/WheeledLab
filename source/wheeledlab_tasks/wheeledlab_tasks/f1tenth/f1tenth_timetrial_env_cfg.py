@@ -85,11 +85,17 @@ class F1TenthTimeTrialObsCfg:
                     'std_noise': 0}            
             )
 
-        base_lin_vel_y_history = ObsTerm(
-            func=base_lin_vel_y_history, 
+        base_lin_acc_x_history = ObsTerm(
+            func=base_lin_acc_x_history, 
             params={'mean_noise': 0,
                     'std_noise': 0}            
             )
+        
+        # base_lin_vel_y_history = ObsTerm(
+        #     func=base_lin_vel_y_history, 
+        #     params={'mean_noise': 0,
+        #             'std_noise': 0}            
+        #     )
                 
         base_ang_vel_z_history = ObsTerm(
             func=base_ang_vel_z_history, 
@@ -113,31 +119,39 @@ class F1TenthTimeTrialObsCfg:
             func=action_history,
         )
 
-        heading_error = ObsTerm(
-            func=heading_error_horizon,
+
+        track_info_horizon = ObsTerm(
+            func=track_info_horizon,
             params={'delta_s_idx': DELTA_S_IDX,
                     'n_horizon': N_HORIZON,
                     't_horizon': T_HORIZON}
         )
-        deviation_error = ObsTerm(
-            func=deviation_centerline_horizon,
-            params={'delta_s_idx': DELTA_S_IDX,
-                    'n_horizon': N_HORIZON,
-                    't_horizon': T_HORIZON}
-        )
-        d_lat_horizon = ObsTerm(
-            func=d_lat_horizon,
-            params={'delta_s_idx': DELTA_S_IDX,
-                    'n_horizon': N_HORIZON,
-                    't_horizon': T_HORIZON}
-        )
-        #only one env gives problem
-        kappa_radpm_horizon = ObsTerm(
-            func=kappa_radpm_horizon,
-            params={'delta_s_idx': DELTA_S_IDX,
-                    'n_horizon': N_HORIZON,
-                    't_horizon': T_HORIZON}
-        )
+
+        # deviation_error = ObsTerm(
+        #     func=deviation_centerline_horizon,
+        #     params={'delta_s_idx': DELTA_S_IDX,
+        #             'n_horizon': N_HORIZON,
+        #             't_horizon': T_HORIZON}
+        # )      
+        # heading_error = ObsTerm(
+        #     func=heading_error_horizon,
+        #     params={'delta_s_idx': DELTA_S_IDX,
+        #             'n_horizon': N_HORIZON,
+        #             't_horizon': T_HORIZON}
+        # )
+        # d_lat_horizon = ObsTerm(
+        #     func=d_lat_horizon,
+        #     params={'delta_s_idx': DELTA_S_IDX,
+        #             'n_horizon': N_HORIZON,
+        #             't_horizon': T_HORIZON}
+        # )
+        # #only one env gives problem
+        # kappa_radpm_horizon = ObsTerm(
+        #     func=kappa_radpm_horizon,
+        #     params={'delta_s_idx': DELTA_S_IDX,
+        #             'n_horizon': N_HORIZON,
+        #             't_horizon': T_HORIZON}
+        # )
 
         # opponent_frenet_info = ObsTerm(
         #     func=opponent_frenet_info
@@ -314,8 +328,8 @@ def store_data(
 
 @configclass
 class F1TenthTimeTrialEventsCfg:
-    
-    # on startup
+
+
     if CONFIG['env_config']['RESET_RANDOM']:
         reset_root_state_random = EventTerm(
             func=reset_root_state_random,
@@ -331,6 +345,7 @@ class F1TenthTimeTrialEventsCfg:
             func=reset_root_state_start_idx,
             mode="reset",
         )
+        
         
 
 @configclass
@@ -418,17 +433,22 @@ class F1TenthTimeTrialRewardsCfg:
     # Standard reward for progressing along centerline, weight=1
     progress_rew = RewTerm(
         func=progress_rew,
-        weight=1.0,
+        weight=0.5,
     )
-    
+
+    average_vel = RewTerm(
+        func=average_vel,
+        weight=0.5,
+    )
+        
     wall_collision_penalty = RewTerm(
         func=wall_collision_penalty,
-        weight=1,
+        weight=1.0,
     )
 
     var_throttle_penalty =  RewTerm(
         func=var_throttle_penalty,
-        weight=0.03,
+        weight=0.1,
     )
 
     # var_throttle_rate_penalty =  RewTerm(
@@ -452,7 +472,7 @@ class F1TenthTimeTrialRewardsCfg:
     
     effort_steering_penalty =  RewTerm(
         func=effort_steering_penalty,
-        weight=0.05,
+        weight=0.5,
     )
     # delta_steering_l2_penalty =  RewTerm(
     #     func=delta_steering_l2_penalty,
@@ -487,8 +507,8 @@ class TimeTrialCurriculumCfg:
         params={
             "reward_term_name": "wall_collision_penalty",
             "weight_increase": 0,
-            "first_episode_increase": 50,
-            "episodes_per_increase": 50,
+            "first_episode_increase": 25,
+            "episodes_per_increase": 25,
             "max_num_increases": 0,
         }
     )
@@ -497,10 +517,10 @@ class TimeTrialCurriculumCfg:
         func=increase_reward_weight_over_time,
         params={
             "reward_term_name": "var_throttle_penalty",
-            "weight_increase": 0.01,
-            "first_episode_increase": 4,
-            "episodes_per_increase": 4,
-            "max_num_increases": 0,
+            "weight_increase": 0.5,
+            "first_episode_increase": 25,
+            "episodes_per_increase": 25,
+            "max_num_increases": 3,
         }
     )
     
@@ -519,10 +539,11 @@ class TimeTrialCurriculumCfg:
         func=increase_reward_weight_over_time,
         params={
             "reward_term_name": "var_steering_penalty",
-            "weight_increase": 0.01,
-            "first_episode_increase": 4,
-            "episodes_per_increase": 4,
-            "max_num_increases": 0,
+            "weight_increase": 0.5,
+            "max_weight": 2,
+            "first_episode_increase": 25,
+            "episodes_per_increase": 25,
+            "max_num_increases": 3,
         }
     )
     
@@ -607,7 +628,10 @@ class F1TenthTimeTrialTerminationsCfg:
     #     func=out_of_map,
     # )
 
-
+    # lap_completed = DoneTerm(
+    #     func=lap_completed
+    # )
+    
 @configclass
 class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
 
@@ -747,11 +771,12 @@ class F1TenthTimeTrialEnv(ManagerBasedEnv):
                                                    device=self.device)
         
         # Save history of last #history_length waypoints idx
-        self._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']
         self._progress_history_checkpoint_idx = CONFIG['env_config']['PROGRESS_HISTORY_CHECKPOINT_IDX']
+        
+        self._total_progress_indices = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
 
         self._progress_history_indices = torch.zeros(
-            (self.num_envs, self._progress_history_length),  # Shape: (num_envs, history_length)
+            (self.num_envs, self._reward_history_length),  # Shape: (num_envs, history_length)
             dtype=torch.long,
             device=self.device
         )
@@ -777,6 +802,11 @@ class F1TenthTimeTrialEnv(ManagerBasedEnv):
             device=self.device
         )
         self._base_ang_vel_z_history = torch.zeros(
+            (self.num_envs, self._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=self.device
+        )
+        self._base_lin_acc_x_history = torch.zeros(
             (self.num_envs, self._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
             dtype=torch.float32,
             device=self.device

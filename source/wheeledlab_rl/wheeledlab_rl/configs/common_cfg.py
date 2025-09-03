@@ -18,9 +18,9 @@ class LogConfig:
     log_every: int = 50                                 # Log every n updates
     video: bool = True                                  # Record videos during training
     video_length: int = 250                             # Length of the recorded video (in steps)
-    video_interval: int = 5000                          # Interval between video recordings (in steps)
+    video_interval: int = 5000                           # Interval between video recordings (in steps)
     no_checkpoints: bool = False                        # Disable saving checkpoints
-    checkpoint_every: int = 50                         # Save checkpoint every n updates
+    checkpoint_every: int = 100                          # Save checkpoint every n updates
     no_wandb: bool = False                              # Disable wandb logging
     wandb_project: str = "WheeledLab"                   # Wandb project name
     test_mode: bool = False                             # Test mode (disable logging, wandb, video, checkpoints). Overrides other flags
@@ -46,8 +46,8 @@ class TrainConfig:
     device: str = "cuda:0"              # Device to use
     load_run: Optional[str] = None    # Load a previously trained model
     load_run_checkpoint: int = 0        # Load a specific checkpoint from a previously trained model
-    # load_run: Optional[str] = "20250825_0250"      # Load a previously trained model
-    # load_run_checkpoint: int = 2550        # Load a
+    # load_run: Optional[str] = "increased_distance_to_overtake_40toovertake"      # Load a previously trained model
+    # load_run_checkpoint: int = 2900        # Load a
     
     log: LogConfig = LogConfig()
 

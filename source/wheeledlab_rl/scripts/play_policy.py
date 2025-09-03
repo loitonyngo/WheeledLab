@@ -30,7 +30,7 @@ parser = argparse.ArgumentParser(description="Play a policy in WheeledLab.")
 ###### DEFINE POLICY TO PLAY ######
 ###################################
 DEFAULT_LOGS_PATH = "/home/tongo/WheeledLab/source/wheeledlab_rl/logs/"
-POLICY = "20250825_0250" 
+POLICY = "overtake_8192_256_512_static_horizon_gap_history_removed_obs_set_opp" 
 SAVE_NAME = 'test'
 SAVE_DIR = '/home/tongo/WheeledLab/source/wheeledlab_rl/logs_play_policy'
 TIMESTAMP = datetime.now().strftime("%m%d_%H%M")
@@ -175,7 +175,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
         's_idx_max': [],
         'inner_bounds': [],
         'outer_bounds': [],
-        'vel_y_calc': []
+        'vel_y_calc': [],
+        'delta_s_opp_ego': []
     }
 
     ### PLAY POLICY ###
@@ -227,7 +228,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
            data['outer_bounds'].append(extras['outer'])
         except:
             print('WARNING: could not store data')
-
+        try:
+            data['delta_s_opp_ego'].append(extras['delta_s_opp_ego'])
+        except:
+            print('WARNING: could not store data')
     print(time_idx)
     ###
 
@@ -302,7 +306,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     except:
         print('WARNING try except')
 
-
+    try:
+        delta_s_opp_ego = torch.squeeze(data['delta_s_opp_ego']).cpu().numpy() 
+    except:
+        print('WARNING try except')
+        
     # actions[start_idx:end_idx, 0, 0] =  np.clip(actions[start_idx:end_idx, 0, 0], a_max=0.5, a_min=-1)
  
     plt.figure(figsize=(15, 15))  # Adjusted height for 4 subplots
@@ -396,27 +404,30 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     ax3.set_title("Angular Velocity and Heading Angle")
     ax3.grid(True)
 
-    ax4 = plt.subplot(4, 1, 4, sharex=ax1)
-    # ax4.plot(real_data['Time'], xy_diff, 
-    #         label='xy pos diff', color='black')
-    ax3.set_title("Offset Cmd Speed")
+    try:
+        ax4 = plt.subplot(4, 1, 4, sharex=ax1)
+        # ax4.plot(real_data['Time'], xy_diff, 
+        #         label='xy pos diff', color='black')
+        ax3.set_title("Offset Cmd delta_s_opp_ego")
 
-    ax4.plot(time[start_idx:end_idx], actions[start_idx:end_idx, 0, 0]*8 - vel_x[start_idx:end_idx], 
-            color='red', label='vel command offset')
-    ax3.legend()
+        ax4.plot(time[start_idx:end_idx], delta_s_opp_ego[start_idx:end_idx], 
+                color='red', label='delta_s_opp_ego')
+        ax3.legend()
 
-    ax4.grid(True)
+        ax4.grid(True)
 
-    # ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, 0, 1], color='b', label='Real Lin Vel ')
-    # ax1.plot(real_data['Time'], real_data['vy'], label='Real Vel Y', color='b', linestyle='--')
+        # ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, 0, 1], color='b', label='Real Lin Vel ')
+        # ax1.plot(real_data['Time'], real_data['vy'], label='Real Vel Y', color='b', linestyle='--')
 
 
-    # ax1.plot(time[start_idx:end_idx], vel[start_idx:end_idx], label='Vel')
-    # ax1.plot(time[start_idx:end_idx], s_idx[start_idx:end_idx]/np.max(s_idx[start_idx:end_idx]), label='s_idx (normalized)')
-    # ax1.set_xlabel("time [s]")
-    # ax1.set_ylabel("velocity [m/s]")
-    # ax1.grid(True)
-
+        # ax1.plot(time[start_idx:end_idx], vel[start_idx:end_idx], label='Vel')
+        # ax1.plot(time[start_idx:end_idx], s_idx[start_idx:end_idx]/np.max(s_idx[start_idx:end_idx]), label='s_idx (normalized)')
+        # ax1.set_xlabel("time [s]")
+        # ax1.set_ylabel("velocity [m/s]")
+        # ax1.grid(True)
+    except:
+        None
+        
     plt.figure(figsize=(10,10))
     try:
         plt.scatter(inner[:,0], inner[:,1], color='black')

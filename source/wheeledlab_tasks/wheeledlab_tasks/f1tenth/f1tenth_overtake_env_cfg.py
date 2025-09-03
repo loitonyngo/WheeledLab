@@ -42,7 +42,7 @@ from .disable_lidar import disable_all_lidars
 
 from .utils import create_maps_from_waypoints, generate_random_poses_from_waypoints_with_opponent, find_frenet_coord_along_waypoints 
 from . import mdp_sensors
-from .mdp import reset_root_state_random_with_opponent, reset_root_state_start_idx
+from .mdp import reset_root_state_random, reset_root_state_random_with_opponent, reset_root_state_start_idx
 
 from .mdp.observations import *
 from .mdp.rewards import *
@@ -87,11 +87,17 @@ class F1TenthOvertakeObsCfg:
                     'std_noise': 0}            
             )
 
-        base_lin_vel_y_history = ObsTerm(
-            func=base_lin_vel_y_history, 
+        base_lin_acc_x_history = ObsTerm(
+            func=base_lin_acc_x_history, 
             params={'mean_noise': 0,
                     'std_noise': 0}            
             )
+        
+        # base_lin_vel_y_history = ObsTerm(
+        #     func=base_lin_vel_y_history, 
+        #     params={'mean_noise': 0,
+        #             'std_noise': 0}            
+        #     )
                 
         base_ang_vel_z_history = ObsTerm(
             func=base_ang_vel_z_history, 
@@ -116,40 +122,18 @@ class F1TenthOvertakeObsCfg:
                     't_horizon': T_HORIZON}
         )
         
-        # heading_error = ObsTerm(
-        #     func=heading_error_horizon,
-        #     params={'delta_s_idx': DELTA_S_IDX,
-        #             'n_horizon': N_HORIZON,
-        #             't_horizon': T_HORIZON}
-        # )
-        # deviation_error = ObsTerm(
-        #     func=deviation_centerline_horizon,
-        #     params={'delta_s_idx': DELTA_S_IDX,
-        #             'n_horizon': N_HORIZON,
-        #             't_horizon': T_HORIZON}
-        # )
-        # d_lat_horizon = ObsTerm(
-        #     func=d_lat_horizon,
-        #     params={'delta_s_idx': DELTA_S_IDX,
-        #             'n_horizon': N_HORIZON,
-        #             't_horizon': T_HORIZON}
-        # )
-        # #only one env gives problem
-        # kappa_radpm_horizon = ObsTerm(
-        #     func=kappa_radpm_horizon,
-        #     params={'delta_s_idx': DELTA_S_IDX,
-        #             'n_horizon': N_HORIZON,
-        #             't_horizon': T_HORIZON}
-        # )
-
-        opponent_info_history = ObsTerm(
-            func=opponent_info_history
+        opponent_relative_info_history = ObsTerm(
+            func=opponent_relative_info_history
         )
         
         gaps_info = ObsTerm(
-            func=gaps_info
+            func=gaps_info_history
         ) 
-        
+
+        # opponent_frenet_coordinates_history = ObsTerm(
+        #     func=opponent_frenet_coordinates_history
+        # ) 
+                
         # delta_psi_rad_horizon = ObsTerm(
         #     func=delta_psi_rad_horizon,
         #     params={'delta_s_idx': delta_s_idx,
@@ -239,7 +223,7 @@ class F1TenthOvertakeTerrainImporterCfg(TerrainImporterCfg):
                 y + random.uniform(-1,1)*max_radius_offset, 
                 0.02),
                 rot_euler_xyz_deg=(0., 0., angle),
-                lin_vel=(0.0, 0, 0.0),  # Add linear velocity
+                lin_vel=(0, 0, 0.0),  # Add linear velocity
                 ang_vel=(0.0, 0.0, 0.0)  # Angular velocity is zero
             ) for (x, y, angle), (vx, vy) in zip(init_poses, ego_velocities)
         ]
@@ -281,7 +265,7 @@ class F1TenthOvertakeSceneCfg(InteractiveSceneCfg):
     MAP_NAME_LIST = None
     ground = AssetBaseCfg(
         prim_path="/World/base",
-        spawn = sim_utils.GroundPlaneCfg(size=(1000 , 1000),
+        spawn = sim_utils.GroundPlaneCfg(size=(1500 , 1500),
                                          color=(0,0,0),
                                          physics_material=sim_utils.RigidBodyMaterialCfg(
                                             friction_combine_mode="multiply",
@@ -311,8 +295,8 @@ class F1TenthOvertakeSceneCfg(InteractiveSceneCfg):
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 kinematic_enabled= False, 
                 rigid_body_enabled=True,
-                solver_position_iteration_count=4,
-                solver_velocity_iteration_count=1,
+                solver_position_iteration_count=0,
+                solver_velocity_iteration_count=0,
                 max_angular_velocity=100.0,
                 max_linear_velocity=100.0,
                 max_depenetration_velocity=0.00001,
@@ -367,9 +351,14 @@ def store_data(
 
 @configclass
 class F1TenthOvertakeEventsCfg:
-    
+
     # on startup
     if CONFIG['env_config']['RESET_RANDOM']:
+        # reset_root_state_random = EventTerm(
+        #     func=reset_root_state_random,
+        #     mode="reset",
+        # )
+            
         reset_root_state_random = EventTerm(
             func=reset_root_state_random_with_opponent,
             mode="reset",
@@ -516,7 +505,6 @@ class F1TenthOvertakeEventsRandomCfg(F1TenthOvertakeEventsCfg):
         params={}          
     )
 
-
 ######################
 ###### REWARDS #######
 ######################
@@ -530,33 +518,42 @@ class F1TenthOvertakeRewardsCfg:
     # Standard reward for progressing along centerline, weight=1
     progress_rew = RewTerm(
         func=progress_rew,
-        weight=1,
+        weight=0.1,
     )
-    
+    average_vel = RewTerm(
+        func=average_vel,
+        weight=0.2,
+    )
+        
     wall_collision_penalty = RewTerm(
         func=wall_collision_penalty,
-        weight=0.5,
+        weight=1.0,
     )
 
     opponent_collision_penalty = RewTerm(
         func=opponent_collision_penalty,
-        weight=0.5,
+        weight=1.0,
     )
 
     opponent_overtake_completed_reward = RewTerm(
         func=opponent_overtake_completed_reward,
-        weight=20,
+        weight=100,
     )
     
     opponent_overtake_distance_reward = RewTerm(
         func=opponent_overtake_distance_reward,
-        weight=0.01,
+        weight=0.1,
     )
 
-    opponent_overtake_delta_distance_reward = RewTerm(
-        func=opponent_overtake_delta_distance_reward,
-        weight=10,
-    )
+    # opponent_overtake_delta_distance_reward = RewTerm(
+    #     func=opponent_overtake_delta_distance_reward,
+    #     weight=10,
+    # )
+
+    # opponent_mean_delta_speed = RewTerm(
+    #     func=opponent_mean_delta_speed,
+    #     weight=0.01,
+    # )
 
     # opponent_overtake_positioning_reward = RewTerm(
     #     func=opponent_overtake_positioning_reward,
@@ -570,12 +567,12 @@ class F1TenthOvertakeRewardsCfg:
     
     var_throttle_penalty =  RewTerm(
         func=var_throttle_penalty,
-        weight=0.01,
+        weight=0.05,
     )
     
     var_steering_penalty =  RewTerm(
         func=var_steering_penalty,
-        weight=0.01,
+        weight=1,
     )
 
     effort_throttle_penalty =  RewTerm(
@@ -585,7 +582,7 @@ class F1TenthOvertakeRewardsCfg:
     
     effort_steering_penalty =  RewTerm(
         func=effort_steering_penalty,
-        weight=0.01,
+        weight=0.2,
     )
 
     # low_speed_penalty =  RewTerm(
@@ -606,7 +603,7 @@ class F1TenthOvertakeRewardsCfg:
 ###### CURRICULUM ######
 ########################
 
-MAX_NUM_INC = 5
+MAX_NUM_INC = 0
 @configclass
 class OvertakeCurriculumCfg:
 
@@ -614,7 +611,8 @@ class OvertakeCurriculumCfg:
         func=increase_reward_weight_over_time,
         params={
             "reward_term_name": "progress_rew",
-            "weight_increase": -0.15,
+            "weight_increase": -0.10,
+            "min_weight": 0.5,
             "first_episode_increase": 50,
             "episodes_per_increase": 50,
             "max_num_increases": MAX_NUM_INC,
@@ -625,10 +623,11 @@ class OvertakeCurriculumCfg:
         func=increase_reward_weight_over_time,
         params={
             "reward_term_name": "wall_collision_penalty",
-            "weight_increase": 0.1,
-            "first_episode_increase": 50,
-            "episodes_per_increase": 50,
-            "max_num_increases": MAX_NUM_INC,
+            "weight_increase": 0.25,
+            "max_weight": 5,
+            "first_episode_increase": 25,
+            "episodes_per_increase": 25,
+            "max_num_increases": 4,
         }
     )
 
@@ -636,10 +635,11 @@ class OvertakeCurriculumCfg:
         func=increase_reward_weight_over_time,
         params={
             "reward_term_name": "opponent_collision_penalty",
-            "weight_increase": 0.2,
-            "first_episode_increase": 50,
-            "episodes_per_increase": 50,
-            "max_num_increases": MAX_NUM_INC,
+            "weight_increase": 0.25,
+            "max_weight": 5,
+            "first_episode_increase": 25,
+            "episodes_per_increase": 25,
+            "max_num_increases": 8,
         }
     )
 
@@ -648,6 +648,7 @@ class OvertakeCurriculumCfg:
         params={
             "reward_term_name": "opponent_overtake_delta_distance_reward",
             "weight_increase": 2,
+            "max_weight": 20,
             "first_episode_increase": 50,
             "episodes_per_increase": 50,
             "max_num_increases": MAX_NUM_INC,
@@ -658,7 +659,8 @@ class OvertakeCurriculumCfg:
         func=increase_reward_weight_over_time,
         params={
             "reward_term_name": "opponent_overtake_distance_reward",
-            "weight_increase": 0.03,
+            "weight_increase": 0.05,
+            "max_weight": 1,
             "first_episode_increase": 50,
             "episodes_per_increase": 50,
             "max_num_increases": MAX_NUM_INC,
@@ -680,10 +682,11 @@ class OvertakeCurriculumCfg:
         func=increase_reward_weight_over_time,
         params={
             "reward_term_name": "var_throttle_penalty",
-            "weight_increase": 0.025,
-            "first_episode_increase": 25,
-            "episodes_per_increase": 25,
-            "max_num_increases": 10,
+            "weight_increase": 0.5,
+            "max_weight": 1.5,
+            "first_episode_increase": 50,
+            "episodes_per_increase": 50,
+            "max_num_increases": MAX_NUM_INC,
         }
     )
 
@@ -691,10 +694,11 @@ class OvertakeCurriculumCfg:
         func=increase_reward_weight_over_time,
         params={
             "reward_term_name": "var_steering_penalty",
-            "weight_increase": 0.025,
+            "weight_increase": 0.5,
+            "max_weight": 1.5,
             "first_episode_increase": 25,
             "episodes_per_increase": 25,
-            "max_num_increases": 10,
+            "max_num_increases": MAX_NUM_INC,
         }
     )
 
@@ -709,8 +713,9 @@ class F1TenthOvertakeTerminationsCfg:
     
     # Max episode time reached
     time_out = DoneTerm(
-        func=mdp.time_out, 
-        time_out=True)
+        func=time_out, 
+        time_out=True
+    )
 
     opponent_overtaken = DoneTerm(
             func=opponent_overtaken,
@@ -765,7 +770,7 @@ class F1TenthOvertakeRLEnvCfg(ManagerBasedRLEnvCfg):
         print('[INFO]: F1TenthOvertakeRLEnvCfg class post init START')
 
         # viewer settings
-        self.viewer.eye = [0., 0.0, 35.0] 
+        self.viewer.eye = [0., 0.0, 75.0] 
         self.viewer.lookat = [0.0, 0.0, -3.]
         self.sim.dt = CONFIG['env_config']['SIM_DT']
         self.decimation = CONFIG['env_config']['SIM_DECIMATION']
@@ -873,11 +878,10 @@ class F1TenthOvertakeEnv(ManagerBasedEnv):
                                                    device=self.device)
         
         # Save history of last #history_length waypoints idx
-        self._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']
-        self._progress_history_checkpoint_idx = CONFIG['env_config']['PROGRESS_HISTORY_CHECKPOINT_IDX']
+        self._progress_history_checkpoint_idx = CONFIG['env_config']['PROGRESS_HISTORY_CHECK_IDX']
 
         self._progress_history_indices = torch.zeros(
-            (self.num_envs, self._progress_history_length),  # Shape: (num_envs, history_length)
+            (self.num_envs, self._reward_history_length),  # Shape: (num_envs, history_length)
             dtype=torch.long,
             device=self.device
         )
@@ -982,6 +986,12 @@ class F1TenthOvertakeEnv(ManagerBasedEnv):
             device=self.device
         )
 
+        self._opponent_overtaken_history = torch.zeros(
+            (self.num_envs, self._rew_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.long,
+            device=self.device
+        )
+        
         self._opponent_speed = torch.zeros(
             self.num_envs,  # Shape: (num_envs, history_length, n_actions)
             dtype=torch.float32,
@@ -1012,6 +1022,18 @@ class F1TenthOvertakeEnv(ManagerBasedEnv):
             device=self.device
         )
 
+        self._opponent_s_history = torch.zeros(
+            (self.num_envs, self._obs_history_length), 
+            dtype=torch.float32,
+            device=self.device
+        )
+
+        self._opponent_d_history = torch.zeros(
+            (self.num_envs, self._obs_history_length), 
+            dtype=torch.float32,
+            device=self.device
+        )
+                
         self._s_idx_diff_history = torch.zeros(
             (self.num_envs, self._obs_history_length), 
             dtype=torch.float32,
@@ -1035,6 +1057,29 @@ class F1TenthOvertakeEnv(ManagerBasedEnv):
             dtype=torch.float32,
             device=self.device
         )
+
+        self._cross_pos_history = torch.zeros(
+            (self.num_envs, self._obs_history_length), 
+            dtype=torch.float32,
+            device=self.device
+        )
+        
+        self._gap_inner_history = torch.zeros(
+            (self.num_envs, self._obs_history_length), 
+            dtype=torch.float32,
+            device=self.device
+        )
+        self._gap_outer_history = torch.zeros(
+            (self.num_envs, self._obs_history_length), 
+            dtype=torch.float32,
+            device=self.device
+        )        
+        
+        self._opponent_overtaken_counter = 0
+        self._opponent_collision_counter = 0
+        self._wall_collision_counter = 0
+
+        self._opponent_min_vel_scaling = CONFIG['env_config']['OPP_MIN_VEL_SCALING']
                                 
         ######################################################################
         ################# TRACK INFO STORED AS TENSOR IN LISTS ###############

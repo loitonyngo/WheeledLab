@@ -74,19 +74,47 @@ def wall_collision_penalty(env):
         # Update the collision_bool tensor for these environments
         collision_bool[env_mask] = collisions_in_map
 
+
+     
     return torch.where(collision_bool.bool(), -1, 0)
-    # return torch.where(collision_bool.bool(), -1, 0)
+
+def opponent_mean_delta_speed(env):
+    # num_episodes = env.common_step_counter // env.max_episode_length
+    # if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_UNTIL_EP']:
+    #     return torch.zeros(env.num_envs, device=env.device, dtype=torch.long)
+   
+    if not hasattr(env, '_vx_diff_history'):
+        env._vx_diff_history = torch.zeros(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )
+        
+    mean_vx_diff = torch.mean(env._vx_diff_history, dim=1)
+
+    return -mean_vx_diff
 
 
 def opponent_collision_penalty(env):
     # num_episodes = env.common_step_counter // env.max_episode_length
     # if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_UNTIL_EP']:
     #     return torch.zeros(env.num_envs, device=env.device, dtype=torch.long)
-    
+   
+    if not hasattr(env, '_opponent_vel_scaling_lvl'):
+       env._opponent_vel_scaling_lvl = torch.zeros(
+            env.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+        )       
+        
     ego_position_xy = env.scene["robot"].data.root_pos_w[:, :2]
     opp_position_xy = env.scene["opponent"].data.root_pos_w[:, :2]
     dist = torch.norm(ego_position_xy - opp_position_xy, p=2, dim=1)
-    opp_collision = dist < CONFIG['env_config']['OPP_COLLISION_RADIUS']
+    opp_collision = torch.where(
+                                env._cross_pos_history[:, 0] < CONFIG['env_config']['CROSS_POS_LIM'],
+                                dist < CONFIG['env_config']['OPP_FRONT_COLLISION_RADIUS'],
+                                dist < CONFIG['env_config']['OPP_LAT_COLLISION_RADIUS']
+    )
 
     return torch.where(opp_collision.bool(), -1, 0)
     # return torch.where(opp_collision.bool(), -1, 0)
@@ -99,7 +127,7 @@ def opponent_overtake_delta_distance_reward(env):
     if not hasattr(env, '_prev_delta_s_opp_ego'):
         env._prev_delta_s_opp_ego = torch.ones(env.num_envs, 
                                 dtype=torch.float32,
-                                device=env.device)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']*CONFIG['env_config']['LEN_S_IDX']  
+                                device=env.device)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX_MAX']*CONFIG['env_config']['LEN_S_IDX']  
         
     ego_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("robot"))[..., :2]
     opp_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("opponent"))[:, :2]
@@ -110,10 +138,10 @@ def opponent_overtake_delta_distance_reward(env):
                                 dtype=torch.long,
                                 device=env.device)
     if not hasattr(env, '_progress_history_indices'):
-        env._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']  # Store last 10 waypoints
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']  # Store last 10 waypoints
 
         env._progress_history_indices = torch.zeros(
-            (env.num_envs, env._progress_history_length), 
+            (env.num_envs, env._rew_history_length), 
             dtype=torch.long,
             device=env.device
         )
@@ -122,8 +150,7 @@ def opponent_overtake_delta_distance_reward(env):
             dtype=torch.bool,
             device=env.device
         )
-    if not hasattr(env, '_progress_history_checkpoint_idx'):
-        env._progress_history_checkpoint_idx = CONFIG['env_config']['PROGRESS_HISTORY_CHECKPOINT_IDX']
+
     map_levels = env._map_levels  # shape: [num_envs]
     unique_map_levels = torch.unique(map_levels)
     
@@ -214,10 +241,10 @@ def opponent_overtake_distance_reward(env):
         ]
     
     if not hasattr(env, '_progress_history_indices'):
-        env._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']  # Store last 10 waypoints
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']  # Store last 10 waypoints
 
         env._progress_history_indices = torch.zeros(
-            (env.num_envs, env._progress_history_length), 
+            (env.num_envs, env._rew_history_length), 
             dtype=torch.long,
             device=env.device
         )
@@ -226,8 +253,7 @@ def opponent_overtake_distance_reward(env):
             dtype=torch.bool,
             device=env.device
         )
-    if not hasattr(env, '_progress_history_checkpoint_idx'):
-        env._progress_history_checkpoint_idx = CONFIG['env_config']['PROGRESS_HISTORY_CHECKPOINT_IDX']
+
     map_levels = env._map_levels  # shape: [num_envs]
     unique_map_levels = torch.unique(map_levels)
     
@@ -260,7 +286,8 @@ def opponent_overtake_distance_reward(env):
             opp_position_xy[env_mask]
         )
 
-        delta_s_opp_ego[env_mask] = ((opp_current_idx-ego_current_idx + num_waypoints//2) % num_waypoints - num_waypoints // 2).float()
+        opp_overtaken_idx = opp_current_idx+CONFIG['env_config']['OPPONENT_OVERTAKEN_IDX']
+        delta_s_opp_ego[env_mask] = ((opp_overtaken_idx-ego_current_idx + num_waypoints//2) % num_waypoints - num_waypoints // 2).float()
 
         # ego_behind_opp_bool[env_mask] = delta_s_opp_ego[env_mask] > 0
         # env._prev_delta_s_opp_ego[env_mask] = delta_s_opp_ego[env_mask]*CONFIG['env_config']['LEN_S_IDX']  
@@ -299,10 +326,10 @@ def opponent_overtake_completed_reward(env):
                                 device=env.device)
         
     if not hasattr(env, '_progress_history_indices'):
-        env._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']  # Store last 10 waypoints
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']  # Store last 10 waypoints
 
         env._progress_history_indices = torch.zeros(
-            (env.num_envs, env._progress_history_length), 
+            (env.num_envs, env._rew_history_length), 
             dtype=torch.long,
             device=env.device
         )
@@ -311,8 +338,7 @@ def opponent_overtake_completed_reward(env):
             dtype=torch.bool,
             device=env.device
         )
-    if not hasattr(env, '_progress_history_checkpoint_idx'):
-        env._progress_history_checkpoint_idx = CONFIG['env_config']['PROGRESS_HISTORY_CHECKPOINT_IDX']
+        
     map_levels = env._map_levels  # shape: [num_envs]
     unique_map_levels = torch.unique(map_levels)
     
@@ -374,8 +400,31 @@ def opponent_overtake_completed_reward(env):
         torch.ones(env.num_envs, device=env.device, dtype=bool),
         torch.zeros(env.num_envs, device=env.device, dtype=bool)
     )
+
+        
+    if not hasattr(env, '_opponent_overtaken_history'):
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
+        env._opponent_overtaken_history = torch.zeros(
+            (env.num_envs, env._rew_history_length),
+            dtype=torch.long,
+            device=env.device,
+        )
+        
+    env._opponent_overtaken_history[:, 1:] = env._opponent_overtaken_history[:, :-1].clone()
+    env._opponent_overtaken_history[:, 0] = env._opponent_overtaken_bool
     
-    return env._opponent_overtaken_bool.float()*env._opponent_vel_scaling
+    overtake_completed = env._opponent_overtaken_history.min(dim=1).values == 1
+
+    env.extras['log']['Info/opponent_vel_scaling'] = env._opponent_vel_scaling_lvl
+    env.extras['log']['Info/opponent_overtaken_counter'] = env._opponent_overtaken_counter 
+    env.extras['log']['Info/opponent_overtaken_step'] = torch.sum(overtake_completed.float())
+    env.extras['log']['Info/opponent_collision_counter'] = env._opponent_collision_counter 
+    env.extras['log']['Info/opponent_collision_step'] = torch.sum(env._opponent_collision_history[:, CONFIG['env_config']['OPPONENT_COLLISION_CHECK_IDX']])
+    env.extras['log']['Info/opponent_overtaken_collision_ratio'] = env._opponent_overtaken_counter/(env._opponent_collision_counter+env._opponent_overtaken_counter+env._wall_collision_counter+1)
+    
+    env.extras['delta_s_opp_ego'] = delta_s_opp_ego[0]
+    
+    return overtake_completed.float()*env._opponent_vel_scaling
 
 def opponent_overtake_positioning_reward(env):
     num_episodes = env.common_step_counter // env.max_episode_length  
@@ -385,7 +434,7 @@ def opponent_overtake_positioning_reward(env):
     if not hasattr(env, '_prev_delta_s_opp_ego'):
         env._prev_delta_s_opp_ego = torch.ones(env.num_envs, 
                                 dtype=torch.float32,
-                                device=env.device)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']*CONFIG['env_config']['LEN_S_IDX']  
+                                device=env.device)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX_MAX']*CONFIG['env_config']['LEN_S_IDX']  
         
     ego_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("robot"))[..., :2]
     opp_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("opponent"))[:, :2]
@@ -406,10 +455,10 @@ def opponent_overtake_positioning_reward(env):
                                 dtype=torch.long,
                                 device=env.device)
     if not hasattr(env, '_progress_history_indices'):
-        env._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']  # Store last 10 waypoints
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']  # Store last 10 waypoints
 
         env._progress_history_indices = torch.zeros(
-            (env.num_envs, env._progress_history_length), 
+            (env.num_envs, env._rew_history_length), 
             dtype=torch.long,
             device=env.device
         )
@@ -419,7 +468,7 @@ def opponent_overtake_positioning_reward(env):
             device=env.device
         )
     if not hasattr(env, '_progress_history_checkpoint_idx'):
-        env._progress_history_checkpoint_idx = CONFIG['env_config']['PROGRESS_HISTORY_CHECKPOINT_IDX']
+        env._progress_history_checkpoint_idx = CONFIG['env_config']['PROGRESS_HISTORY_CHECK_IDX']
     map_levels = env._map_levels  # shape: [num_envs]
     unique_map_levels = torch.unique(map_levels)
     
@@ -559,10 +608,10 @@ def progress_rew(env):
 def progress_waypoint_bool(env):
     # Initialize buffer if first run
     if not hasattr(env, '_progress_history_indices'):
-        env._progress_history_length = CONFIG['env_config']['PROGRESS_HISTORY_LENGTH']  # Store last 10 waypoints
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']  # Store last 10 waypoints
 
         env._progress_history_indices = torch.zeros(
-            (env.num_envs, env._progress_history_length), 
+            (env.num_envs, env._rew_history_length), 
             dtype=torch.long,
             device=env.device
         )
@@ -572,8 +621,10 @@ def progress_waypoint_bool(env):
             device=env.device
         )
     if not hasattr(env, '_progress_history_checkpoint_idx'):
-        env._progress_history_checkpoint_idx = CONFIG['env_config']['PROGRESS_HISTORY_CHECKPOINT_IDX']
-
+        env._progress_history_checkpoint_idx = CONFIG['env_config']['PROGRESS_HISTORY_CHECK_IDX']
+    if not hasattr(env, '_total_progress_indices'):
+        env._total_progress_indices = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+    
     # Get current positions and map levels
     position_xy_world = mdp.root_pos_w(env)[..., :2]
     if not hasattr(env, '_map_levels'):
@@ -585,7 +636,19 @@ def progress_waypoint_bool(env):
             torch.tensor(wps, device=env.device, dtype=torch.float32)
             for wps in env.scene.terrain.cfg.waypoints_list
         ]
-
+    if not hasattr(env, '_initial_waypoint_indices'):
+        env._initial_waypoint_indices = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+    if not hasattr(env, '_total_progress_indices'):
+        env._total_progress_indices = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+    if not hasattr(env, '_wall_collision_history'):
+        env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
+        env._wall_collision_history = torch.zeros(
+            (env.num_envs, env._rew_history_length), 
+            dtype=torch.long,
+            device=env.device
+        )
+    no_off_track = env._wall_collision_history.max(dim=1).values == 0  
+    
     map_levels = env._map_levels  # shape: [num_envs]
     unique_map_levels = torch.unique(map_levels)
     
@@ -626,7 +689,9 @@ def progress_waypoint_bool(env):
         # Calculate progress
         current_progress = (current_idx - env._progress_history_indices[env_mask, env._progress_history_checkpoint_idx]) % num_waypoints
         progress[env_mask] = current_progress
-        
+        # env._total_progress_indices[env_mask] += torch.where(no_off_track,
+        #                                                     current_progress,
+        #                                                     0)
         # Calculate progress bool
         progress_bool[env_mask] = (current_progress > 0) & (current_progress <= CONFIG['env_config']['MAX_PROGRESS_IDX']) & (env._reset_env_bool[env_mask] == False)
     
@@ -668,6 +733,7 @@ def progress_waypoint_bool(env):
     
     env.extras['vel_y_calc'] = env._vel_y_calc
 
+    env.extras['log']['Info/mean_speed'] = torch.mean(env._base_lin_vel_x_history)
 
     return progress_bool, progress
 
@@ -817,3 +883,26 @@ def low_speed_penalty(env):
     forward_speed_mean = torch.mean(env._base_lin_vel_x_history, dim=1)
     
     return torch.where(forward_speed_mean < 1, -1, 0.) # avoid standstill
+
+def low_speed_penalty(env):
+    if not hasattr(env, '_base_lin_vel_x_history'):
+        env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
+        env._base_lin_vel_x_history = torch.zeros(
+            (env.num_envs, env._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+            )
+    forward_speed_mean = torch.mean(env._base_lin_vel_x_history, dim=1)
+    
+    return torch.where(forward_speed_mean < 1, -1, 0.) # avoid standstill
+
+def average_vel(env):
+    if not hasattr(env, '_base_lin_vel_x_history'):
+        env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
+        env._base_lin_vel_x_history = torch.zeros(
+            (env.num_envs, env._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+            )
+        
+    return torch.mean(env._base_lin_vel_x_history, dim=1)

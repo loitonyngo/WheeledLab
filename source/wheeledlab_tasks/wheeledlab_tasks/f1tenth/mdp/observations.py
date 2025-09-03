@@ -93,6 +93,24 @@ def base_ang_vel_z_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sce
     
     return base_ang_vel_z_history
 
+def base_lin_acc_x_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
+    """Root linear acceleration in the asset's root frame. 2D, only x and y"""
+    # extract the used quantities (to enable type-hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
+    if not hasattr(env, '_base_lin_acc_x_history'):
+        env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
+        env._base_lin_acc_x_history = torch.zeros(
+            (env.num_envs, env._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+            )
+    # shift the history to the right and insert the last angular velocity at the beginning
+    env._base_lin_acc_x_history[:, 1:] = env._base_lin_acc_x_history[:, :-1].clone()
+    env._base_lin_acc_x_history[:, 0]  = (env._base_lin_vel_x_history[:, 0] - env._base_lin_vel_x_history[:, 1])/(env.step_dt)
+
+    return env._base_lin_acc_x_history
+
 def target_velocity_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
     # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
@@ -307,7 +325,9 @@ def deviation_centerline_horizon(
             torch.tensor(wps, device=env.device, dtype=torch.float32)
             for wps in env.scene.terrain.cfg.waypoints_list
         ]
-    
+    if not hasattr(env, '_inner_list'):
+        env._inner_list = [torch.tensor(inner, device=env.device, dtype=torch.float32)
+                           for inner in env.scene.terrain.cfg.inner_list]    
     # Get map levels for all environments
     map_levels = env._map_levels  # shape: [num_envs]
     unique_map_levels = torch.unique(map_levels)
@@ -812,7 +832,7 @@ def delta_psi_rad_horizon(
 
     return delta_psi_rad
 
-def opponent_info_history(
+def opponent_relative_info_history(
     env: ManagerBasedEnv, 
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     opponent_cfg: SceneEntityCfg = SceneEntityCfg("opponent")
@@ -849,6 +869,12 @@ def opponent_info_history(
             dtype=torch.float32,
             device=env.device
         )
+    if not hasattr(env, '_cross_pos_history'):
+        env._cross_pos_history = torch.zeros(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )        
         
     if not hasattr(env, '_opponent_speed'):
        env._opponent_speed = torch.zeros(
@@ -856,6 +882,7 @@ def opponent_info_history(
             dtype=torch.float32,
             device=env.device
         )
+       
     if not hasattr(env, '_opponent_d_dot'):
        env._opponent_d_dot = torch.zeros(
             env.num_envs,  # Shape: (num_envs, history_length, n_actions)
@@ -864,6 +891,12 @@ def opponent_info_history(
         )
     if not hasattr(env, '_opponent_heading'):
        env._opponent_heading = torch.zeros(
+            env.num_envs,  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+        )       
+    if not hasattr(env, '_opponent_vel_scaling_lvl'):
+       env._opponent_vel_scaling_lvl = torch.zeros(
             env.num_envs,  # Shape: (num_envs, history_length, n_actions)
             dtype=torch.float32,
             device=env.device
@@ -886,7 +919,7 @@ def opponent_info_history(
     unique_map_levels = torch.unique(map_levels)
 
     num_envs              = ego_pos_xy_world.shape[0]
-    s_idx_diff_opp_ego    = torch.zeros(num_envs, device=env.device, dtype= torch.float32)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX']*CONFIG['env_config']['LEN_S_IDX']
+    s_idx_diff_opp_ego    = torch.ones(num_envs, device=env.device, dtype= torch.float32)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX_MAX']*CONFIG['env_config']['LEN_S_IDX']
     t_diff_opp_ego        = torch.zeros(num_envs, device=env.device, dtype= torch.float32)
     time_to_collision     = torch.zeros(num_envs, device=env.device, dtype= torch.float32)
 
@@ -924,7 +957,7 @@ def opponent_info_history(
         opp_current_s_idx, opp_current_d = find_frenet_coord_along_waypoints(waypoints_xy_world, opp_map_positions)
         
 
-        d_diff_opp_ego[env_mask]            = opp_current_d     - ego_current_d
+        d_diff_opp_ego[env_mask]   = opp_current_d     - ego_current_d
         s_idx_diff_raw    = opp_current_s_idx - ego_current_s_idx
         s_idx_diff_signed = (s_idx_diff_raw + num_waypoints // 2) % num_waypoints - (num_waypoints // 2)
         s_idx_diff_opp_ego[env_mask] = s_idx_diff_signed*CONFIG['env_config']['LEN_S_IDX']
@@ -963,9 +996,14 @@ def opponent_info_history(
     env._heading_diff_history[:, 1:] = env._heading_diff_history[:, :-1].clone()
     env._heading_diff_history[:, 0] = opp_ego_heading_diff                   
 
-    return torch.cat([env._s_idx_diff_history.reshape(num_envs, -1), env._d_diff_history.reshape(num_envs, -1), env._vx_diff_history.reshape(num_envs, -1), env._heading_diff_history.reshape(num_envs, -1), time_to_collision.reshape(num_envs, -1), cross_pos_opp_ego.reshape(num_envs, -1)],dim=1)
+    env._cross_pos_history[:, 1:] = env._cross_pos_history[:, :-1].clone()
+    env._cross_pos_history[:, 0] = cross_pos_opp_ego     
+    ######
 
-def gaps_info(
+    
+    return torch.cat([env._s_idx_diff_history.reshape(num_envs, -1), env._d_diff_history.reshape(num_envs, -1), env._vx_diff_history.reshape(num_envs, -1), env._heading_diff_history.reshape(num_envs, -1), env._cross_pos_history.reshape(num_envs, -1)],dim=1)
+
+def gaps_info_history(
     env: ManagerBasedEnv, 
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     opponent_cfg: SceneEntityCfg = SceneEntityCfg("opponent")
@@ -996,7 +1034,20 @@ def gaps_info(
             torch.tensor(inner, device=env.device, dtype=torch.float32)
             for inner in env.scene.terrain.cfg.inner_list
         ]                
-        
+
+    if not hasattr(env, '_gap_inner_history'):
+        env._gap_inner_history = torch.zeros(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )
+    if not hasattr(env, '_gap_outer_history'):
+        env._gap_outer_history = torch.zeros(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )
+             
     # Get map levels for all environments
     map_levels = env._map_levels  # shape: [num_envs]
     unique_map_levels = torch.unique(map_levels)
@@ -1004,10 +1055,10 @@ def gaps_info(
     num_envs                    = ego_pos_xy_world.shape[0]
     gap_inner                   = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
     gap_outer                   = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
-    gap_inner_heading_error     = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
-    gap_outer_heading_error     = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
+    # gap_inner_heading_error     = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
+    # gap_outer_heading_error     = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
 
-    opp_detected          = torch.zeros(num_envs, device = env.device, dtype=torch.long)
+    # opp_detected          = torch.zeros(num_envs, device = env.device, dtype=torch.long)
 
     # Process each map level separately
 
@@ -1024,8 +1075,8 @@ def gaps_info(
             continue
             
         # Get positions for these environments
-        ego_map_positions = ego_pos_xy_world[env_mask]
-        ego_map_headings =  ego_heading_w[env_mask]
+        # ego_map_positions = ego_pos_xy_world[env_mask]
+        # ego_map_headings =  ego_heading_w[env_mask]
 
         opp_map_positions = opp_pos_xy_world[env_mask]
 
@@ -1035,7 +1086,7 @@ def gaps_info(
         outer_xy_world = env._outer_list[map_level][:, :2]
 
         
-        num_waypoints = len(waypoints_xy_world)
+        # num_waypoints = len(waypoints_xy_world)
         # ego_current_s_idx, ego_current_d = find_frenet_coord_along_waypoints(waypoints_xy_world, ego_map_positions)
         # opp_current_s_idx, opp_current_d = find_frenet_coord_along_waypoints(waypoints_xy_world, opp_map_positions)
         opp_current_inner_idx, _ = find_frenet_coord_along_waypoints(inner_xy_world, opp_map_positions)
@@ -1051,24 +1102,101 @@ def gaps_info(
         gap_inner[env_mask] = torch.norm(opp_map_positions-inner_xy_world[opp_current_inner_idx, :], dim=1)
         gap_outer[env_mask] = torch.norm(opp_map_positions-outer_xy_world[opp_current_outer_idx, :], dim=1)
         
-        # GAPS HEADING DIRECTION
-        gap_inner_center =   (opp_map_positions + inner_xy_world[opp_current_inner_idx, :])/2
-        gap_outer_center =   (opp_map_positions + outer_xy_world[opp_current_outer_idx, :])/2
+        # # GAPS HEADING DIRECTION
+        # gap_inner_center =   (opp_map_positions + inner_xy_world[opp_current_inner_idx, :])/2
+        # gap_outer_center =   (opp_map_positions + outer_xy_world[opp_current_outer_idx, :])/2
         
-        # Calculate desired heading vectors [num_envs_in_map, n_horizon]
-        desired_headings_gap_inner = torch.atan2(
-            gap_inner_center[:, 1] - ego_map_positions[:, 1],
-            gap_inner_center[:, 0] - ego_map_positions[:, 0]
-        )
+        # # Calculate desired heading vectors [num_envs_in_map, n_horizon]
+        # desired_headings_gap_inner = torch.atan2(
+        #     gap_inner_center[:, 1] - ego_map_positions[:, 1],
+        #     gap_inner_center[:, 0] - ego_map_positions[:, 0]
+        # )
         
-        desired_headings_gap_outer = torch.atan2(
-            gap_outer_center[:, 1] - ego_map_positions[:, 1],
-            gap_outer_center[:, 0] - ego_map_positions[:, 0]
+        # desired_headings_gap_outer = torch.atan2(
+        #     gap_outer_center[:, 1] - ego_map_positions[:, 1],
+        #     gap_outer_center[:, 0] - ego_map_positions[:, 0]
+        # )
+        # gap_inner_heading_error[env_mask] = torch.atan2(torch.sin(desired_headings_gap_inner - ego_map_headings),torch.cos(desired_headings_gap_inner - ego_map_headings))
+        # gap_outer_heading_error[env_mask] = torch.atan2(torch.sin(desired_headings_gap_outer - ego_map_headings),torch.cos(desired_headings_gap_outer - ego_map_headings))
+    
+    env._gap_inner_history[:, 1:] = env._gap_inner_history[:, :-1].clone()
+    env._gap_inner_history[:, 0] = gap_inner                   
+    
+    env._gap_outer_history[:, 1:] = env._gap_outer_history[:, :-1].clone()
+    env._gap_outer_history[:, 0] = gap_outer                   
+    
+    return torch.cat([env._gap_inner_history.reshape(num_envs,-1), env._gap_outer_history.reshape(num_envs,-1)],dim=1)
+
+def opponent_frenet_coordinates_history(
+    env: ManagerBasedEnv, 
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    opponent_cfg: SceneEntityCfg = SceneEntityCfg("opponent")
+) -> torch.Tensor:
+
+    ego_pos_xy_world = mdp.root_pos_w(env=env, asset_cfg=asset_cfg)[..., :2]
+    opp_pos_xy_world = mdp.root_pos_w(env=env, asset_cfg=opponent_cfg)[..., :2]
+    # opp_vel_x = mdp.base_lin_vel(env=env, asset_cfg=opponent_cfg)[..., 0]
+    
+    if not hasattr(env, '_opponent_s_history'):
+        env._opponent_s_history = torch.zeros(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
         )
-        gap_inner_heading_error[env_mask] = torch.atan2(torch.sin(desired_headings_gap_inner - ego_map_headings),torch.cos(desired_headings_gap_inner - ego_map_headings))
-        gap_outer_heading_error[env_mask] = torch.atan2(torch.sin(desired_headings_gap_outer - ego_map_headings),torch.cos(desired_headings_gap_outer - ego_map_headings))
-                
-    return torch.stack([gap_inner - CONFIG['env_config']['OPP_SIZE_RADIUS']*2, gap_outer - CONFIG['env_config']['OPP_SIZE_RADIUS']*2],dim=1)
+    if not hasattr(env, '_opponent_d_history'):
+        env._opponent_d_history = torch.zeros(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )
+    if not hasattr(env, '_map_levels'):
+        env._map_levels = torch.zeros(env.num_envs, 
+                                dtype=torch.long,
+                                device=env.device)
+    if not hasattr(env, '_waypoints_list'):
+        env._waypoints_list = [
+            torch.tensor(wps, device=env.device, dtype=torch.float32)
+            for wps in env.scene.terrain.cfg.waypoints_list
+        ]
+        
+    # Get map levels for all environments
+    map_levels = env._map_levels  # shape: [num_envs]
+    unique_map_levels = torch.unique(map_levels)
+
+    num_envs              = ego_pos_xy_world.shape[0]
+    opp_current_s         = torch.zeros(num_envs, device=env.device, dtype= torch.float32)
+    opp_current_d         = torch.zeros(num_envs, device=env.device, dtype= torch.float32)
+
+    # Process each map level separately
+
+    for map_level in unique_map_levels:
+        # Create mask for environments using this map
+        env_mask = (map_levels == map_level)
+        num_envs_in_map = env_mask.sum()
+        
+        if num_envs_in_map == 0:
+            continue
+
+        opp_map_positions = opp_pos_xy_world[env_mask]
+        
+        # Get waypoints and track data for this map level
+        waypoints_xy_world = env._waypoints_list[map_level][:, :2]
+        
+        # FRENET DISTANCES
+        num_waypoints = len(waypoints_xy_world)
+        opp_current_s_idx_map, opp_current_d_map = find_frenet_coord_along_waypoints(waypoints_xy_world, opp_map_positions)
+
+        opp_current_s[env_mask] = (opp_current_s_idx_map+1)/num_waypoints
+        opp_current_d[env_mask] = opp_current_d_map
+        
+    env._opponent_s_history[:, 1:] = env._opponent_s_history[:, :-1].clone()
+    env._opponent_s_history[:, 0] = opp_current_s
+ 
+    env._opponent_d_history[:, 1:] = env._opponent_d_history[:, :-1].clone()
+    env._opponent_d_history[:, 0] = opp_current_d
+    
+    return torch.cat([env._opponent_s_history.reshape(num_envs, -1), env._opponent_d_history.reshape(num_envs, -1)],dim=1)
+
 
 # def opponent_heading_error_horizon(
 #     env: ManagerBasedEnv, 
