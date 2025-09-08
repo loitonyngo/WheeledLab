@@ -38,8 +38,46 @@ def increase_reward_weight_over_time(
     if (num_episodes + 1) % episodes_per_increase == 0: # discount the first episode
         term_cfg = env.reward_manager.get_term_cfg(reward_term_name)
         term_cfg.weight += weight_increase
+        term_cfg.weight = min(term_cfg.weight, max_weight)
+        term_cfg.weight = max(term_cfg.weight, min_weight)
+        
         env.reward_manager.set_term_cfg(reward_term_name, term_cfg)
 
+def increase_reward_weight_over_time_every_n_steps(
+        env: ManagerBasedRLEnv,
+        env_ids: Sequence[int],
+        reward_term_name : str,
+        weight_increase : float,
+        max_weight: float = 100,
+        min_weight: float = 0,
+        start_increase_after_n_steps : int = 100,
+        steps_per_increase : int = 100,
+        max_num_increases: int = torch.inf,
+        ) -> torch.Tensor:
+    """
+    Increase the weight of a reward term after some amount of given time in episodes.
+    Default amount of time is one episode.
+    Stops increasing the weight after `stop_after_n_changes` changes. Defaults to inf.
+    """
+    num_increases = env.common_step_counter // steps_per_increase - env.common_step_counter // start_increase_after_n_steps
+
+    if env.common_step_counter < start_increase_after_n_steps:
+        return
+
+    if num_increases > max_num_increases:
+        return # do nothing
+
+    if env.common_step_counter % env.max_episode_length != 0:
+        return # only process at the beginning of an episode (not per step)
+
+    if env.common_step_counter % steps_per_increase == 0: # discount the first episode
+        term_cfg = env.reward_manager.get_term_cfg(reward_term_name)
+        term_cfg.weight += weight_increase
+        term_cfg.weight = min(term_cfg.weight, max_weight)
+        term_cfg.weight = max(term_cfg.weight, min_weight)
+        
+        env.reward_manager.set_term_cfg(reward_term_name, term_cfg)
+        
 def multiplier_reward_weight_over_time(
         env: ManagerBasedRLEnv,
         env_ids: Sequence[int],

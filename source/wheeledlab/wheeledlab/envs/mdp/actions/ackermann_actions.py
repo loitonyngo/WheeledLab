@@ -314,7 +314,7 @@ class AckermannIncrementalAction(ActionTerm):
         self._raw_actions[:] = actions
 
         if self._bounding_strategy == 'clip':
-            self._processed_actions = torch.clip(actions, min=-1.0, max=1.0) * torch.tensor([CONFIG['env_config']['MAX_SPEED_INCREMENT'], 0.4], device=self.device) + self._offset
+            self._processed_actions = torch.clip(actions, min=-1.0, max=1.0) * torch.tensor([CONFIG['env_config']['MAX_SPEED_INCREMENT'], CONFIG['env_config']['MAX_STEERING_ANGLE_INCREMENT']], device=self.device) + self._offset
         
         elif self._bounding_strategy == 'tanh':
             self._processed_actions = torch.tanh(actions) * self._scale + self._offset
@@ -329,10 +329,17 @@ class AckermannIncrementalAction(ActionTerm):
         # actual_velocity = self._asset.data.root_lin_vel_b[:, 0]
         # self._processed_actions[:, 0] = torch.clamp(self._processed_actions[:, 0], min=-0.25) # brake less aggressive
         self._target_velocity = torch.clamp(self._env._target_velocity_history[:, 0] + self.processed_actions[:, 0], min=0.0)
+        self._target_steering_angle = torch.clamp(self._env._target_steering_angle_history[:, 0] + self.processed_actions[:, 1], min=-CONFIG['env_config']['MAX_STEERING_SCALING'], max=CONFIG['env_config']['MAX_STEERING_SCALING'])
         
+        # alpha = 0.3  # tune between 0.1–0.5
+        # prev_action = self._env._action_history[:, -1, 1]  # last applied action
+        # new_action = self.processed_actions[:, 1]
+
+        # smoothed_action = alpha * new_action + (1 - alpha) * prev_action
+        # steering_target = smoothed_action
         left_rotator_angle, right_rotator_angle, wheel_speeds = self._calculate_ackermann_angles_and_velocities(
             target_velocity= self._target_velocity, # Velocity for all cars
-            target_steering_angle= self.processed_actions[:, 1] # Steering angle for all cars
+            target_steering_angle= self._target_steering_angle # Steering angle for all cars
         )
         
         front_wheel_angles = torch.stack([left_rotator_angle, right_rotator_angle], dim=1)

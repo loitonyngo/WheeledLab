@@ -74,8 +74,7 @@ def wall_collision_penalty(env):
         # Update the collision_bool tensor for these environments
         collision_bool[env_mask] = collisions_in_map
 
-
-     
+    # vel_x = mdp.base_lin_vel(env)[:, 0]
     return torch.where(collision_bool.bool(), -1, 0)
 
 def opponent_mean_delta_speed(env):
@@ -106,18 +105,30 @@ def opponent_collision_penalty(env):
             dtype=torch.float32,
             device=env.device
         )       
+    if not hasattr(env, '_s_idx_diff_history'):
+        env._s_idx_diff_history = torch.ones(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )
+    if not hasattr(env, '_d_diff_history'):
+        env._d_diff_history = torch.ones(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )
         
     ego_position_xy = env.scene["robot"].data.root_pos_w[:, :2]
     opp_position_xy = env.scene["opponent"].data.root_pos_w[:, :2]
     dist = torch.norm(ego_position_xy - opp_position_xy, p=2, dim=1)
-    opp_collision = torch.where(
-                                env._cross_pos_history[:, 0] < CONFIG['env_config']['CROSS_POS_LIM'],
-                                dist < CONFIG['env_config']['OPP_FRONT_COLLISION_RADIUS'],
-                                dist < CONFIG['env_config']['OPP_LAT_COLLISION_RADIUS']
+    
+    opp_collision = (
+        (abs(env._s_idx_diff_history[:, 0]) < CONFIG['env_config']['OPP_FRONT_COLLISION_RADIUS']) & 
+        (abs(env._d_diff_history[:, 0]) < CONFIG['env_config']['OPP_LAT_COLLISION_RADIUS'])
     )
-
+        
     return torch.where(opp_collision.bool(), -1, 0)
-    # return torch.where(opp_collision.bool(), -1, 0)
+
 
 def opponent_overtake_delta_distance_reward(env):
     # num_episodes = env.common_step_counter // env.max_episode_length
@@ -125,9 +136,9 @@ def opponent_overtake_delta_distance_reward(env):
     #     return torch.zeros(env.num_envs, device=env.device, dtype=torch.long)
     
     if not hasattr(env, '_prev_delta_s_opp_ego'):
-        env._prev_delta_s_opp_ego = torch.ones(env.num_envs, 
+        env._prev_delta_s_opp_ego = torch.zeros(env.num_envs, 
                                 dtype=torch.float32,
-                                device=env.device)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX_MAX']*CONFIG['env_config']['LEN_S_IDX']  
+                                device=env.device)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX_MIN']*CONFIG['env_config']['LEN_S_IDX']  
         
     ego_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("robot"))[..., :2]
     opp_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("opponent"))[:, :2]
@@ -308,7 +319,7 @@ def opponent_overtake_distance_reward(env):
             device=env.device
         )
     no_opp_collision = env._opponent_collision_history.max(dim=1).values == 0
-    
+
     return torch.where(no_off_track & no_opp_collision, -delta_s_opp_ego*CONFIG['env_config']['LEN_S_IDX'], 0)
 
 def opponent_overtake_completed_reward(env):
@@ -414,14 +425,17 @@ def opponent_overtake_completed_reward(env):
     env._opponent_overtaken_history[:, 0] = env._opponent_overtaken_bool
     
     overtake_completed = env._opponent_overtaken_history.min(dim=1).values == 1
-
     env.extras['log']['Info/opponent_vel_scaling'] = env._opponent_vel_scaling_lvl
-    env.extras['log']['Info/opponent_overtaken_counter'] = env._opponent_overtaken_counter 
+    if overtake_completed.any() if hasattr(overtake_completed, 'any') else len(overtake_completed) > 0:
+        env.extras['log']['Info/opponent_vel_scaling_max_overtaken'] = max(env._opponent_vel_scaling[overtake_completed])
+    else:
+        env.extras['log']['Info/opponent_vel_scaling_max_overtaken'] = 0.0  # or some default value    env.extras['log']['Info/opponent_overtaken_counter'] = env._opponent_overtaken_counter 
     env.extras['log']['Info/opponent_overtaken_step'] = torch.sum(overtake_completed.float())
     env.extras['log']['Info/opponent_collision_counter'] = env._opponent_collision_counter 
     env.extras['log']['Info/opponent_collision_step'] = torch.sum(env._opponent_collision_history[:, CONFIG['env_config']['OPPONENT_COLLISION_CHECK_IDX']])
     env.extras['log']['Info/opponent_overtaken_collision_ratio'] = env._opponent_overtaken_counter/(env._opponent_collision_counter+env._opponent_overtaken_counter+env._wall_collision_counter+1)
-    
+    env.extras['log']['Info/opponent_overtaken_collision_ratio_step'] = torch.sum(overtake_completed.float())/(torch.sum(env._opponent_collision_history[:, CONFIG['env_config']['OPPONENT_COLLISION_CHECK_IDX']])+torch.sum(overtake_completed.float())+torch.sum(env._wall_collision_history[:, CONFIG['env_config']['WALL_COLLISION_CHECK_IDX']].float())+1)
+
     env.extras['delta_s_opp_ego'] = delta_s_opp_ego[0]
     
     return overtake_completed.float()*env._opponent_vel_scaling
@@ -432,9 +446,9 @@ def opponent_overtake_positioning_reward(env):
         return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
     
     if not hasattr(env, '_prev_delta_s_opp_ego'):
-        env._prev_delta_s_opp_ego = torch.ones(env.num_envs, 
+        env._prev_delta_s_opp_ego = torch.zeros(env.num_envs, 
                                 dtype=torch.float32,
-                                device=env.device)*CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX_MAX']*CONFIG['env_config']['LEN_S_IDX']  
+                                device=env.device)
         
     ego_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("robot"))[..., :2]
     opp_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("opponent"))[:, :2]
@@ -550,27 +564,6 @@ def opponent_overtake_positioning_reward(env):
     # positioning_reward = torch.where(behind_mask, reward_behind, reward_ahead)
 
     return torch.where(no_off_track & no_opp_collision & (ego_progress <= CONFIG['env_config']['MAX_PROGRESS_IDX']), positioning_reward, 0)
-
-# def traversable_reward(env):
-#     poses =mdp.root_pos_w(env)[..., :2]
-#     if not hasattr(env, '_map_levels'):
-#         env._map_levels = torch.zeros(env.num_envs, 
-#                                 dtype=torch.long,
-#                                 device=env.device)
-#     map_levels = env._map_levels
-#     traversability = TraversabilityHashmapUtil().get_traversability(poses, map_levels)
-#     return torch.where(traversability, 1, 0.)
-
-# def out_of_track_penalty(env):
-#     poses =mdp.root_pos_w(env)[..., :2]
-#     if not hasattr(env, '_map_levels'):
-#         env._map_levels = torch.zeros(env.num_envs, 
-#                                 dtype=torch.long,
-#                                 device=env.device)
-#     map_levels = env._map_levels
-#     traversability = TraversabilityHashmapUtil().get_traversability(poses, map_levels)
-
-#     return torch.where(traversability, 0., -1.)
 
 def upright_penalty(env, thresh_deg):
     rot_mat = math_utils.matrix_from_quat(mdp.root_quat_w(env))
@@ -712,6 +705,12 @@ def progress_waypoint_bool(env):
             dtype=torch.float32,
             device=env.device
             )
+        env._target_velocity_history = torch.zeros(
+            (env.num_envs, env._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+            )
+        
     env._vel_y_calc =  mdp.base_lin_vel(env)[:, 1]*mdp.base_lin_vel(env)[:, 0]*1.2
     
     ###########################
@@ -723,6 +722,7 @@ def progress_waypoint_bool(env):
     env.extras['vel_x'] = asset.data.root_lin_vel_b[:,0]
     env.extras['vel_y'] = -asset.data.root_lin_vel_b[:,1]
     env.extras['target_velocity'] = env._target_velocity_history[:, 0]
+    env.extras['target_steering'] = env._target_steering_angle_history[:, 0]
 
     env.extras['yaw_rate'] = asset.data.root_ang_vel_b[:,2]
     env.extras['s_idx'] = current_idx.clone()
@@ -826,8 +826,26 @@ def effort_steering_penalty(env):
     # last_throttle_action = mdp.last_action(env)[..., 0]*env.cfg.actions.throttle_steer.scale[0]
 
     effort_steering_penalty = -(env._action_history[:, 0, 1])**2
-    
+
     return effort_steering_penalty # speed target
+
+def effort_target_steering_angle_penalty(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
+    # extract the used quantities (to enable type-hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    if not hasattr(env, '_target_steering_angle_history'):
+        env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
+        env._target_steering_angle_history = torch.zeros(
+            (env.num_envs, env._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+            )    
+    last_action = mdp.last_action(env)[..., 1]*CONFIG['env_config']['MAX_STEERING_ANGLE_INCREMENT']
+    # # shift the history to the right and insert the last angular velocity at the beginning
+    env._target_steering_angle_history[:, 1:] = env._target_steering_angle_history[:, :-1].clone()
+    env._target_steering_angle_history[:, 0] = torch.clamp(env._target_steering_angle_history[:, 0] + last_action, min = -0.4, max=0.4)
+    effort_steering_penalty = -(env._target_steering_angle_history[:, 0])**2
+
+    return effort_steering_penalty
 
 # def delta_throttle_l2_penalty(env):
 #     # last_throttle_action = mdp.last_action(env)[..., 0]*env.cfg.actions.throttle_steer.scale[0]

@@ -30,7 +30,7 @@ parser = argparse.ArgumentParser(description="Play a policy in WheeledLab.")
 ###### DEFINE POLICY TO PLAY ######
 ###################################
 DEFAULT_LOGS_PATH = "/home/tongo/WheeledLab/source/wheeledlab_rl/logs/"
-POLICY = "overtake_8192_256_512_static_horizon_gap_history_removed_obs_set_opp" 
+POLICY = "20250908_0039" 
 SAVE_NAME = 'test'
 SAVE_DIR = '/home/tongo/WheeledLab/source/wheeledlab_rl/logs_play_policy'
 TIMESTAMP = datetime.now().strftime("%m%d_%H%M")

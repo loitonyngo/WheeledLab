@@ -97,7 +97,11 @@ def wall_collision(env):
 
     env.extras['log']['Info/wall_collision_counter'] = env._wall_collision_counter 
     env.extras['log']['Info/wall_collision_step'] = torch.sum(env._wall_collision_history[:, CONFIG['env_config']['WALL_COLLISION_CHECK_IDX']].float())
-    
+    env.extras['log']['Info/effort_steering'] = torch.mean(env._action_history[:,:,1]**2, dim=1)
+    env.extras['log']['Info/effort_throttle'] = torch.mean(env._action_history[:,:,0]**2, dim=1)
+    env.extras['log']['Info/var_steering'] = torch.var(env._action_history[:,:,1], dim=1)
+    env.extras['log']['Info/var_throttle'] = torch.var(env._action_history[:,:,0], dim=1)
+
     return  env._wall_collision_history[:, CONFIG['env_config']['WALL_COLLISION_CHECK_IDX']].bool()
 
 # def opponent_collision(env):
@@ -155,19 +159,39 @@ def opponent_collision(env):
             dtype=torch.float32,
             device=env.device
         )     
+
+    if not hasattr(env, '_s_idx_diff_history'):
+        env._s_idx_diff_history = torch.ones(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )
+    if not hasattr(env, '_d_diff_history'):
+        env._d_diff_history = torch.ones(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )
         
+                
     # if crosspos < 0.25 distance collision smaller!
     ego_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("robot"))[..., :2]
     opp_position_xy = mdp.root_pos_w(env = env, asset_cfg = SceneEntityCfg("opponent"))[:, :2]
     
     dist = torch.norm(ego_position_xy - opp_position_xy, p=2, dim=1)
     
-    opp_collision = torch.where(
-                                torch.mean(env._cross_pos_history[:, :], dim=1) <  CONFIG['env_config']['CROSS_POS_LIM'],
-                                dist < CONFIG['env_config']['OPP_FRONT_COLLISION_RADIUS'],
-                                dist < CONFIG['env_config']['OPP_LAT_COLLISION_RADIUS']
-    )
+    # opp_collision = torch.where(
+    #                             torch.mean(env._cross_pos_history[:, :], dim=1) <  CONFIG['env_config']['CROSS_POS_LIM'],
+    #                             dist < CONFIG['env_config']['OPP_FRONT_COLLISION_RADIUS'],
+    #                             dist < CONFIG['env_config']['OPP_LAT_COLLISION_RADIUS']
+    # )
 
+    opp_collision = (
+        (abs(env._s_idx_diff_history[:, 0]) < CONFIG['env_config']['OPP_FRONT_COLLISION_RADIUS']) & 
+        (abs(env._d_diff_history[:, 0]) < CONFIG['env_config']['OPP_LAT_COLLISION_RADIUS']) &
+        (torch.mean(env._cross_pos_history[:, :], dim=1) <  CONFIG['env_config']['CROSS_POS_LIM'])
+    )
+    
     env._opponent_collision_history[:, 1:] = env._opponent_collision_history[:, :-1].clone()
     env._opponent_collision_history[:, 0] = opp_collision
     

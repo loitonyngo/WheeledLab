@@ -449,7 +449,7 @@ def set_hashmap_usd(map_name, hashmap, origin, map_size_pixels, map_size_meters,
 #         plane.CreateDisplayColorPrimvar(UsdGeom.Tokens.uniform).Set(face_colors_triangle)
 
 
-def set_points_usd(points, map_name, points_name, origin, stage, color):
+def set_points_usd(points, map_name, points_name, origin, stage, color, radius = 0.1):
     # points_usd = [
     #     Gf.Vec3f(
     #         wp[0]+(-map_size_meters[1]/2-x_min) + origin[0],  # X: Apply resolution and shift
@@ -470,7 +470,7 @@ def set_points_usd(points, map_name, points_name, origin, stage, color):
     points_prim = UsdGeom.Points.Define(stage, '/World/'+ map_name +'/'+ points_name)
     points_prim.GetPointsAttr().Set(points_usd)
     # Visual stylin
-    points_prim.CreateWidthsAttr().Set([0.1] * len(points_usd))  # 10cm diameter points
+    points_prim.CreateWidthsAttr().Set([radius] * len(points_usd))  # 10cm diameter points
     points_prim.CreateDisplayColorPrimvar(UsdGeom.Tokens.constant).Set(color)  # Red
     points_prim.CreateVisibilityAttr().Set(UsdGeom.Tokens.inherited)
     return points_usd

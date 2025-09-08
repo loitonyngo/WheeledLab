@@ -90,24 +90,24 @@ def create_maps_from_waypoints(maps_folder_path, map_name_list, origin_list, sta
         # Convert points to USD coordinates
         waypoints_usd = set_points_usd(
             data['waypoints'], map_name, 'waypoints', origin_list[i], 
-            stage, [(1.0, 0.0, 0.0)]
+            stage, [(1.0, 0.0, 0.0)], radius=0.05
         )
         outer_usd = set_points_usd(
             data['outer'], map_name, 'outer', origin_list[i], 
-            stage, [(0.0, 1.0, 0.0)]
+            stage, [(0.0, 1.0, 0.0)], radius=0.2
         )
         inner_usd = set_points_usd(
             data['inner'], map_name, 'inner', origin_list[i], 
-            stage, [(0.25, 1.0, 0.0)]
+            stage, [(0.25, 1.0, 0.0)], radius=0.2
         )
 
         opp_traj_iqp_usd = set_points_usd(
             data['opp_traj_iqp'][:,0:2], map_name, 'opp_traj_iqp', origin_list[i], 
-            stage, [(1.0, 1.0, 0.0)]
+            stage, [(1.0, 1.0, 0.0)], radius=0.05
         )
         opp_traj_sp_usd = set_points_usd(
             data['opp_traj_sp'][:,0:2], map_name, 'opp_traj_sp', origin_list[i], 
-            stage, [(0.0, 1.0, 1.0)]
+            stage, [(0.0, 1.0, 1.0)], radius=0.05
         )
 
         

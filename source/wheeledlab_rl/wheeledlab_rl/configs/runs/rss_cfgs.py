@@ -12,7 +12,7 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M")
 class RSS_TIMETRIAL(RslRlRunConfig):
     env_setup = EnvSetup(
         num_envs=4096,
-        env_spacing= 12,
+        env_spacing= 14,
         task_name="Isaac-F1TenthTimeTrialRL-v0"
     )
     # unique-jazz-683
@@ -33,7 +33,7 @@ class RSS_TIMETRIAL(RslRlRunConfig):
 class RSS_OVERTAKE(RslRlRunConfig):
     env_setup = EnvSetup(
         num_envs=4096,
-        env_spacing= 12,
+        env_spacing= 14,
         task_name="Isaac-F1TenthOvertakeRL-v0"
     )
     # unique-jazz-683
@@ -42,7 +42,7 @@ class RSS_OVERTAKE(RslRlRunConfig):
         rl_algo_lib="rsl",
         rl_algo_class="ppo",
         log=LogConfig(
-            video_interval=2000,
+            video_interval=1000,
             run_name = timestamp
         ),
     )

@@ -122,13 +122,36 @@ def target_velocity_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sc
             dtype=torch.float32,
             device=env.device
             )
-    
+        env._target_steering_angle_history = torch.zeros(
+            (env.num_envs, env._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+            )    
     last_action = mdp.last_action(env)[..., 0]*CONFIG['env_config']['MAX_SPEED_INCREMENT']
     # # shift the history to the right and insert the last angular velocity at the beginning
     env._target_velocity_history[:, 1:] = env._target_velocity_history[:, :-1].clone()
     env._target_velocity_history[:, 0] = torch.clamp(env._target_velocity_history[:, 0] + last_action, min = 0.0)
-    target_velocity_history = env._target_velocity_history
-    return target_velocity_history
+
+    return env._target_velocity_history
+
+def target_steering_angle_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
+    # extract the used quantities (to enable type-hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
+    if not hasattr(env, '_target_steering_angle_history'):
+        env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
+        env._target_steering_angle_history = torch.zeros(
+            (env.num_envs, env._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=env.device
+            )    
+    last_action = mdp.last_action(env)[..., 1]*CONFIG['env_config']['MAX_STEERING_ANGLE_INCREMENT']
+    # # shift the history to the right and insert the last angular velocity at the beginning
+    env._target_steering_angle_history[:, 1:] = env._target_steering_angle_history[:, :-1].clone()
+    env._target_steering_angle_history[:, 0] = torch.clamp(env._target_steering_angle_history[:, 0] + last_action, min = -0.4, max=0.4)
+
+    return env._target_steering_angle_history
+
 #last action is from -1 and 1, not clipped
 def action_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
     """Root angular velocity in the asset's root frame. Only z, yaw rade"""
@@ -206,7 +229,8 @@ def track_info_horizon(
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     delta_s_idx: int = 10,
     n_horizon: int = 5,
-    t_horizon: int = 5
+    t_horizon: int = 5,
+    position_std_noise: float = 0.0
 ) -> torch.Tensor:
     """
     Compute multiple horizon-based observations in one pass:
@@ -223,7 +247,18 @@ def track_info_horizon(
           + n_horizon (kappa)
     """
     # State
-    pos_xy_world = mdp.root_pos_w(env)[..., :2]
+    pos_xy_world = mdp.root_pos_w(env)[..., :2]     
+    # Add noise to each environment's position
+    if position_std_noise > 0.0:
+        # Create noise with the same shape as pos_xy_world: [num_envs, 2]
+        noise = torch.normal(
+            mean=0.0, 
+            std=position_std_noise, 
+            size=pos_xy_world.shape, 
+            device=pos_xy_world.device
+        )
+        pos_xy_world = pos_xy_world + noise
+        
     vel_x        = mdp.base_lin_vel(env)[..., 0]
     heading_w    = env.scene[asset_cfg.name].data.heading_w
     num_envs     = pos_xy_world.shape[0]
@@ -835,7 +870,9 @@ def delta_psi_rad_horizon(
 def opponent_relative_info_history(
     env: ManagerBasedEnv, 
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    opponent_cfg: SceneEntityCfg = SceneEntityCfg("opponent")
+    opponent_cfg: SceneEntityCfg = SceneEntityCfg("opponent"),
+    position_std_noise: float = 0.0,
+    velocity_std_noise: float = 0.0
 ) -> torch.Tensor:
 
     ego_pos_xy_world = mdp.root_pos_w(env=env, asset_cfg=asset_cfg)[..., :2]
@@ -844,7 +881,17 @@ def opponent_relative_info_history(
 
     opp_pos_xy_world = mdp.root_pos_w(env=env, asset_cfg=opponent_cfg)[..., :2]
     # opp_vel_x = mdp.base_lin_vel(env=env, asset_cfg=opponent_cfg)[..., 0]
-    
+
+    if position_std_noise > 0.0:
+        # Create noise with the same shape as pos_xy_world: [num_envs, 2]
+        noise = torch.normal(
+            mean=0.0, 
+            std=position_std_noise, 
+            size=opp_pos_xy_world.shape, 
+            device=opp_pos_xy_world.device
+        )
+        opp_pos_xy_world = opp_pos_xy_world + noise
+        
     if not hasattr(env, '_s_idx_diff_history'):
         env._s_idx_diff_history = torch.zeros(
             (env.num_envs, env._obs_history_length), 
@@ -875,7 +922,12 @@ def opponent_relative_info_history(
             dtype=torch.float32,
             device=env.device
         )        
-        
+    if not hasattr(env, '_opponent_d_history'):
+        env._opponent_d_history = torch.zeros(
+            (env.num_envs, env._obs_history_length), 
+            dtype=torch.float32,
+            device=env.device
+        )
     if not hasattr(env, '_opponent_speed'):
        env._opponent_speed = torch.zeros(
             env.num_envs,  # Shape: (num_envs, history_length, n_actions)
@@ -913,6 +965,16 @@ def opponent_relative_info_history(
                
     opp_vel_x   = env._opponent_speed
     opp_heading = env._opponent_heading
+
+    if velocity_std_noise > 0.0:
+        # Create noise with the same shape as pos_xy_world: [num_envs, 2]
+        noise = torch.normal(
+            mean=0.0, 
+            std=velocity_std_noise, 
+            size=opp_vel_x.shape, 
+            device=opp_vel_x.device
+        )
+        opp_vel_x = opp_vel_x + noise
         
     # Get map levels for all environments
     map_levels = env._map_levels  # shape: [num_envs]
@@ -928,7 +990,9 @@ def opponent_relative_info_history(
     is_behind             = torch.zeros(num_envs, device = env.device, dtype=torch.long)
 
     vx_diff_opp_ego       = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
-    opp_ego_heading_diff       = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
+    opp_ego_heading_diff  = torch.zeros(num_envs, device = env.device, dtype=torch.float32)
+
+    opp_d                 = torch.zeros(num_envs, device=env.device, dtype= torch.float32)
 
     # Process each map level separately
 
@@ -956,8 +1020,9 @@ def opponent_relative_info_history(
         ego_current_s_idx, ego_current_d = find_frenet_coord_along_waypoints(waypoints_xy_world, ego_map_positions)
         opp_current_s_idx, opp_current_d = find_frenet_coord_along_waypoints(waypoints_xy_world, opp_map_positions)
         
-
-        d_diff_opp_ego[env_mask]   = opp_current_d     - ego_current_d
+        opp_d[env_mask] = opp_current_d
+        
+        d_diff_opp_ego[env_mask]   = opp_current_d  - ego_current_d
         s_idx_diff_raw    = opp_current_s_idx - ego_current_s_idx
         s_idx_diff_signed = (s_idx_diff_raw + num_waypoints // 2) % num_waypoints - (num_waypoints // 2)
         s_idx_diff_opp_ego[env_mask] = s_idx_diff_signed*CONFIG['env_config']['LEN_S_IDX']
@@ -993,15 +1058,17 @@ def opponent_relative_info_history(
     env._vx_diff_history[:, 1:] = env._vx_diff_history[:, :-1].clone()
     env._vx_diff_history[:, 0] = vx_diff_opp_ego
 
-    env._heading_diff_history[:, 1:] = env._heading_diff_history[:, :-1].clone()
-    env._heading_diff_history[:, 0] = opp_ego_heading_diff                   
+    # env._heading_diff_history[:, 1:] = env._heading_diff_history[:, :-1].clone()
+    # env._heading_diff_history[:, 0] = opp_ego_heading_diff                   
 
     env._cross_pos_history[:, 1:] = env._cross_pos_history[:, :-1].clone()
     env._cross_pos_history[:, 0] = cross_pos_opp_ego     
     ######
-
     
-    return torch.cat([env._s_idx_diff_history.reshape(num_envs, -1), env._d_diff_history.reshape(num_envs, -1), env._vx_diff_history.reshape(num_envs, -1), env._heading_diff_history.reshape(num_envs, -1), env._cross_pos_history.reshape(num_envs, -1)],dim=1)
+    env._opponent_d_history[:, 1:] = env._opponent_d_history[:, :-1].clone()
+    env._opponent_d_history[:, 0] = opp_d
+    
+    return torch.cat([env._s_idx_diff_history.reshape(num_envs, -1), env._d_diff_history.reshape(num_envs, -1), env._vx_diff_history.reshape(num_envs, -1), env._cross_pos_history.reshape(num_envs, -1), env._opponent_d_history.reshape(num_envs, -1)],dim=1)
 
 def gaps_info_history(
     env: ManagerBasedEnv, 
@@ -1085,40 +1152,16 @@ def gaps_info_history(
         inner_xy_world = env._inner_list[map_level][:, :2]
         outer_xy_world = env._outer_list[map_level][:, :2]
 
-        
-        # num_waypoints = len(waypoints_xy_world)
-        # ego_current_s_idx, ego_current_d = find_frenet_coord_along_waypoints(waypoints_xy_world, ego_map_positions)
-        # opp_current_s_idx, opp_current_d = find_frenet_coord_along_waypoints(waypoints_xy_world, opp_map_positions)
-        opp_current_inner_idx, _ = find_frenet_coord_along_waypoints(inner_xy_world, opp_map_positions)
-        opp_current_outer_idx, _ = find_frenet_coord_along_waypoints(outer_xy_world, opp_map_positions)
-
-        # s_idx_diff_raw    = opp_current_s_idx - ego_current_s_idx
-        # s_idx_diff_signed = (s_idx_diff_raw + num_waypoints // 2) % num_waypoints - (num_waypoints // 2)
-
-        # opp_detected[env_mask]       = torch.where(abs(s_idx_diff_signed) <= CONFIG['env_config']['OPPONENT_INIT_DISTANCE_IDX'],
-        #                                torch.ones(len(env_mask), device=env.device, dtype= torch.long), 
-        #                                torch.zeros(len(env_mask), device=env.device, dtype= torch.long))  
+        opp_current_inner_idx, inner_dist = find_frenet_coord_along_waypoints(inner_xy_world, opp_map_positions)
+        opp_current_outer_idx, outer_dist = find_frenet_coord_along_waypoints(outer_xy_world, opp_map_positions)
     
-        gap_inner[env_mask] = torch.norm(opp_map_positions-inner_xy_world[opp_current_inner_idx, :], dim=1)
-        gap_outer[env_mask] = torch.norm(opp_map_positions-outer_xy_world[opp_current_outer_idx, :], dim=1)
-        
-        # # GAPS HEADING DIRECTION
-        # gap_inner_center =   (opp_map_positions + inner_xy_world[opp_current_inner_idx, :])/2
-        # gap_outer_center =   (opp_map_positions + outer_xy_world[opp_current_outer_idx, :])/2
-        
-        # # Calculate desired heading vectors [num_envs_in_map, n_horizon]
-        # desired_headings_gap_inner = torch.atan2(
-        #     gap_inner_center[:, 1] - ego_map_positions[:, 1],
-        #     gap_inner_center[:, 0] - ego_map_positions[:, 0]
-        # )
-        
-        # desired_headings_gap_outer = torch.atan2(
-        #     gap_outer_center[:, 1] - ego_map_positions[:, 1],
-        #     gap_outer_center[:, 0] - ego_map_positions[:, 0]
-        # )
-        # gap_inner_heading_error[env_mask] = torch.atan2(torch.sin(desired_headings_gap_inner - ego_map_headings),torch.cos(desired_headings_gap_inner - ego_map_headings))
-        # gap_outer_heading_error[env_mask] = torch.atan2(torch.sin(desired_headings_gap_outer - ego_map_headings),torch.cos(desired_headings_gap_outer - ego_map_headings))
-    
+        # gap_inner[env_mask] = torch.norm(opp_map_positions-inner_xy_world[opp_current_inner_idx, :], dim=1)
+        # gap_outer[env_mask] = torch.norm(opp_map_positions-outer_xy_world[opp_current_outer_idx, :], dim=1)
+
+        gap_inner[env_mask] = torch.abs(inner_dist)
+        gap_outer[env_mask] = torch.abs(outer_dist)
+
+
     env._gap_inner_history[:, 1:] = env._gap_inner_history[:, :-1].clone()
     env._gap_inner_history[:, 0] = gap_inner                   
     

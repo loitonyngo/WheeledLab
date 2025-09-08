@@ -32,7 +32,7 @@ from isaaclab.utils.math import euler_xyz_from_quat
 from isaaclab.envs import ManagerBasedEnv
 from isaaclab.envs import ManagerBasedRLEnvCfg
 
-from wheeledlab.envs.mdp import increase_reward_weight_over_time
+from wheeledlab.envs.mdp import increase_reward_weight_over_time, increase_reward_weight_over_time_every_n_steps
 from wheeledlab_assets import WHEELEDLAB_ASSETS_DATA_DIR
 from wheeledlab_assets.mushr import MUSHR_SUS_CFG
 from wheeledlab_assets.f1tenth import F1TENTH_CFG, OPPONENT_CFG, LB_CFG
@@ -82,7 +82,7 @@ class F1TenthTimeTrialObsCfg:
         base_lin_vel_x_history = ObsTerm(
             func=base_lin_vel_x_history, 
             params={'mean_noise': 0,
-                    'std_noise': 0}            
+                    'std_noise': 0.0}            
             )
 
         base_lin_acc_x_history = ObsTerm(
@@ -91,12 +91,6 @@ class F1TenthTimeTrialObsCfg:
                     'std_noise': 0}            
             )
         
-        # base_lin_vel_y_history = ObsTerm(
-        #     func=base_lin_vel_y_history, 
-        #     params={'mean_noise': 0,
-        #             'std_noise': 0}            
-        #     )
-                
         base_ang_vel_z_history = ObsTerm(
             func=base_ang_vel_z_history, 
             params={'mean_noise': 0,
@@ -108,23 +102,23 @@ class F1TenthTimeTrialObsCfg:
             params={'mean_noise': 0,
                     'std_noise': 0}         
             )
-             
-        # last_action = ObsTerm(
-        #     func=mdp.last_action,
-        #     clip=(-1., 1.), # TODO: get from ClipAction wrapper
-        #     noise=Unoise(n_min=-.0, n_max=.0, operation='add')
-        # )
-        
+
+        target_steering_angle_history = ObsTerm(
+            func=target_steering_angle_history, 
+            params={'mean_noise': 0,
+                    'std_noise': 0}         
+            )
+
         action_history = ObsTerm(
             func=action_history,
         )
-
 
         track_info_horizon = ObsTerm(
             func=track_info_horizon,
             params={'delta_s_idx': DELTA_S_IDX,
                     'n_horizon': N_HORIZON,
-                    't_horizon': T_HORIZON}
+                    't_horizon': T_HORIZON,
+                    'position_std_noise': 0.08}
         )
 
         # deviation_error = ObsTerm(
@@ -354,12 +348,12 @@ class F1TenthTimeTrialEventsRandomCfg(F1TenthTimeTrialEventsCfg):
     #     func=mdp.randomize_rigid_body_material,
     #     mode="startup",
     #     params={
-    #         "static_friction_range": (0.0, 0.0),
-    #         "dynamic_friction_range": (0.0, 0.0),
+    #         "static_friction_range": (0.67, 0.73),
+    #         "dynamic_friction_range": (0.67, 0.73),
     #         "restitution_range": (0.0, 0.0),
-    #         "num_buckets": 10,
+    #         "num_buckets": 1000,
     #         "asset_cfg": SceneEntityCfg("robot", body_names=".*wheel_.*link"),
-    #         "make_consistent": False,
+    #         "make_consistent": True,
     #     },
     # )
 
@@ -394,19 +388,6 @@ class F1TenthTimeTrialEventsRandomCfg(F1TenthTimeTrialEventsCfg):
     #     },
     # )
 
-    # change_wheel_friction = EventTerm(
-    #     func=mdp.randomize_rigid_body_material,
-    #     mode="startup",
-    #     params={
-    #         "static_friction_range": (STATIC_FRICTION-0.1, STATIC_FRICTION+0.1),
-    #         "dynamic_friction_range": (DYNAMIC_FRICTION-0.1, DYNAMIC_FRICTION+0.1),
-    #         "restitution_range": (0.0, 0.0),
-    #         "num_buckets": 20,
-    #         "asset_cfg": SceneEntityCfg("robot", body_names="wheel.*"),
-    #         "make_consistent": True,
-    #     },
-    # )
-
     kill_lidar = EventTerm(
         func=disable_all_lidars,
         mode="startup",
@@ -433,12 +414,12 @@ class F1TenthTimeTrialRewardsCfg:
     # Standard reward for progressing along centerline, weight=1
     progress_rew = RewTerm(
         func=progress_rew,
-        weight=0.5,
+        weight=1.0,
     )
 
     average_vel = RewTerm(
         func=average_vel,
-        weight=0.5,
+        weight=0.008,
     )
         
     wall_collision_penalty = RewTerm(
@@ -448,30 +429,21 @@ class F1TenthTimeTrialRewardsCfg:
 
     var_throttle_penalty =  RewTerm(
         func=var_throttle_penalty,
-        weight=0.1,
+        weight=0.005,
     )
-
-    # var_throttle_rate_penalty =  RewTerm(
-    #     func=var_throttle_rate_penalty,
-    #     weight=0.00,
-    # )
-    # delta_throttle_l2_penalty =  RewTerm(
-    #     func=delta_throttle_l2_penalty,
-    #     weight=0.0,
-    # )
 
     var_steering_penalty =  RewTerm(
         func=var_steering_penalty,
-        weight=0.5,
+        weight=0.0001,
     )
 
     effort_throttle_penalty =  RewTerm(
         func=effort_throttle_penalty,
-        weight=0.01,
+        weight=0.001,
     )
     
     effort_steering_penalty =  RewTerm(
-        func=effort_steering_penalty,
+        func=effort_target_steering_angle_penalty,
         weight=0.5,
     )
     # delta_steering_l2_penalty =  RewTerm(
@@ -482,6 +454,15 @@ class F1TenthTimeTrialRewardsCfg:
     # delta_speed_cmd_penalty =  RewTerm(
     #     func=delta_speed_cmd_penalty,
     #     weight=0.000,
+    # )
+
+    # var_throttle_rate_penalty =  RewTerm(
+    #     func=var_throttle_rate_penalty,
+    #     weight=0.00,
+    # )
+    # delta_throttle_l2_penalty =  RewTerm(
+    #     func=delta_throttle_l2_penalty,
+    #     weight=0.0,
     # )
 
 
@@ -502,6 +483,21 @@ class F1TenthTimeTrialRewardsCfg:
 @configclass
 class TimeTrialCurriculumCfg:
 
+    average_vel_reward = CurrTerm(
+        func=increase_reward_weight_over_time,
+        params={
+            "reward_term_name": "average_vel",
+            "weight_increase": 0.25,
+            "max_weight": 0.5,
+            "first_episode_increase": 750,
+            "episodes_per_increase": 750,
+            "max_num_increases": 0,
+        }
+    )
+    
+    
+    
+    
     wall_collision_penalty = CurrTerm(
         func=increase_reward_weight_over_time,
         params={
@@ -518,8 +514,8 @@ class TimeTrialCurriculumCfg:
         params={
             "reward_term_name": "var_throttle_penalty",
             "weight_increase": 0.5,
-            "first_episode_increase": 25,
-            "episodes_per_increase": 25,
+            "first_episode_increase": 500,
+            "episodes_per_increase": 500,
             "max_num_increases": 3,
         }
     )
@@ -539,24 +535,38 @@ class TimeTrialCurriculumCfg:
         func=increase_reward_weight_over_time,
         params={
             "reward_term_name": "var_steering_penalty",
-            "weight_increase": 0.5,
+            "weight_increase": 0.1,
             "max_weight": 2,
-            "first_episode_increase": 25,
-            "episodes_per_increase": 25,
-            "max_num_increases": 3,
+            "first_episode_increase": 250,
+            "episodes_per_increase": 250,
+            "max_num_increases": 10,
+        }
+    )
+
+    var_steering_penalty = CurrTerm(
+        func=increase_reward_weight_over_time_every_n_steps,
+        params={
+            "reward_term_name": "var_steering_penalty",
+            "weight_increase": 0.01,
+            "max_weight": 2,
+            "start_increase_after_n_steps" : 500,
+            "steps_per_increase" : 250,
+            "max_num_increases": 10,
         }
     )
     
-    # effort_steering_penalty = CurrTerm(
-    #     func=increase_reward_weight_over_time,
-    #     params={
-    #         "reward_term_name": "effort_steering_penalty",
-    #         "weight_increase": 0.001,
-    #         "first_episode_increase": 4,
-    #         "episodes_per_increase": 5,
-    #         "max_num_increases": 1,
-    #     }
-    # )
+
+    effort_steering_penalty = CurrTerm(
+        func=increase_reward_weight_over_time,
+        params={
+            "reward_term_name": "effort_steering_penalty",
+            "weight_increase": 0.25,
+            "max_weight": 1,
+            "first_episode_increase": 500,
+            "episodes_per_increase": 500,
+            "max_num_increases": 10,
+        }
+    )
         
     # delta_steering_l2_penalty = CurrTerm(
     #     func=increase_reward_weight_over_time,
@@ -604,11 +614,7 @@ class F1TenthTimeTrialTerminationsCfg:
         func=mdp.time_out, 
         time_out=True)
 
-    # Car rolls over
-    # rollover = DoneTerm(
-    #     func=upright_bool,
-    #     params={"thresh_deg": 90.},
-    # )
+
 
     # Car goes out of track
     if CONFIG['env_config']['NON_TRAVERSABLE_TERMINATION']:
@@ -620,17 +626,6 @@ class F1TenthTimeTrialTerminationsCfg:
             func=wall_collision
         )
 
-        # opponent_collision = DoneTerm(
-        #     func=opponent_collision
-        # )
-
-    # out_range = DoneTerm(
-    #     func=out_of_map,
-    # )
-
-    # lap_completed = DoneTerm(
-    #     func=lap_completed
-    # )
     
 @configclass
 class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
@@ -667,7 +662,7 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
         print('[INFO]: F1TenthTimeTrialRLEnvCfg class post init START')
 
         # viewer settings
-        self.viewer.eye = [0., 0.0, 35.0] 
+        self.viewer.eye = [0., 0.0, 60.0] 
         self.viewer.lookat = [0.0, 0.0, -3.]
         self.sim.dt = CONFIG['env_config']['SIM_DT']
         self.decimation = CONFIG['env_config']['SIM_DECIMATION']
@@ -677,7 +672,7 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.render_interval = self.decimation
 
         # Terminations config
-        self.episode_length_s = CONFIG['env_config']['EPISODE_LENGTH_S']
+        self.episode_length_s = CONFIG['env_config']['EPISODE_LENGTH_S_TIMETRIAL']
         self.actions.throttle_steer.scale = (CONFIG['env_config']['MAX_SPEED_SCALING'], CONFIG['env_config']['MAX_STEERING_SCALING'])
         self.actions.throttle_steer.offset = (CONFIG['env_config']['SPEED_OFFSET'], CONFIG['env_config']['STEERING_OFFSET'])
 
@@ -862,6 +857,12 @@ class F1TenthTimeTrialEnv(ManagerBasedEnv):
             device=self.device
         )
 
+        self._target_steering_angle_history = torch.zeros(
+            (self.num_envs, self._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=self.device
+        )
+        
         self._opponent_type = torch.zeros(
             self.num_envs,  # Shape: (num_envs, history_length, n_actions)
             dtype=torch.long,

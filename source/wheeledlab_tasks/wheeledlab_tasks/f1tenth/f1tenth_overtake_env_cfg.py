@@ -84,7 +84,7 @@ class F1TenthOvertakeObsCfg:
         base_lin_vel_x_history = ObsTerm(
             func=base_lin_vel_x_history, 
             params={'mean_noise': 0,
-                    'std_noise': 0}            
+                    'std_noise': 0.5}            
             )
 
         base_lin_acc_x_history = ObsTerm(
@@ -93,12 +93,6 @@ class F1TenthOvertakeObsCfg:
                     'std_noise': 0}            
             )
         
-        # base_lin_vel_y_history = ObsTerm(
-        #     func=base_lin_vel_y_history, 
-        #     params={'mean_noise': 0,
-        #             'std_noise': 0}            
-        #     )
-                
         base_ang_vel_z_history = ObsTerm(
             func=base_ang_vel_z_history, 
             params={'mean_noise': 0,
@@ -110,7 +104,13 @@ class F1TenthOvertakeObsCfg:
             params={'mean_noise': 0,
                     'std_noise': 0}         
             )
-        
+
+        target_steering_angle_history = ObsTerm(
+            func=target_steering_angle_history, 
+            params={'mean_noise': 0,
+                    'std_noise': 0}         
+            )
+                
         action_history = ObsTerm(
             func=action_history,
         )
@@ -119,11 +119,14 @@ class F1TenthOvertakeObsCfg:
             func=track_info_horizon,
             params={'delta_s_idx': DELTA_S_IDX,
                     'n_horizon': N_HORIZON,
-                    't_horizon': T_HORIZON}
+                    't_horizon': T_HORIZON,
+                    'position_std_noise': 0.08}
         )
         
         opponent_relative_info_history = ObsTerm(
-            func=opponent_relative_info_history
+            func=opponent_relative_info_history,
+            params={'position_std_noise': 0.08,
+                    'velocity_std_noise': 0.45}
         )
         
         gaps_info = ObsTerm(
@@ -295,11 +298,11 @@ class F1TenthOvertakeSceneCfg(InteractiveSceneCfg):
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 kinematic_enabled= False, 
                 rigid_body_enabled=True,
-                solver_position_iteration_count=0,
-                solver_velocity_iteration_count=0,
+                solver_position_iteration_count=1,
+                solver_velocity_iteration_count=1,
                 max_angular_velocity=100.0,
                 max_linear_velocity=100.0,
-                max_depenetration_velocity=0.00001,
+                max_depenetration_velocity=1,
                 disable_gravity=True,
             ),
             physics_material=sim_utils.RigidBodyMaterialCfg(
@@ -442,18 +445,18 @@ class F1TenthOvertakeEventsCfg:
 
 @configclass
 class F1TenthOvertakeEventsRandomCfg(F1TenthOvertakeEventsCfg):
-    # change_wheel_friction = EventTerm(
-    #     func=mdp.randomize_rigid_body_material,
-    #     mode="startup",
-    #     params={
-    #         "static_friction_range": (0.0, 0.0),
-    #         "dynamic_friction_range": (0.0, 0.0),
-    #         "restitution_range": (0.0, 0.0),
-    #         "num_buckets": 10,
-    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*wheel_.*link"),
-    #         "make_consistent": False,
-    #     },
-    # )
+    change_wheel_friction = EventTerm(
+        func=mdp.randomize_rigid_body_material,
+        mode="startup",
+        params={
+            "static_friction_range": (CONFIG['env_config']['STATIC_FRICTION']-CONFIG['env_config']['STD_FRICTION'], CONFIG['env_config']['STATIC_FRICTION']+CONFIG['env_config']['STD_FRICTION']),
+            "dynamic_friction_range": (CONFIG['env_config']['DYNAMIC_FRICTION']-CONFIG['env_config']['STD_FRICTION'], CONFIG['env_config']['DYNAMIC_FRICTION']+CONFIG['env_config']['STD_FRICTION']),
+            "restitution_range": (0.0, 0.0),
+            "num_buckets": CONFIG['env_config']['NUM_BUCKETS_FRICTION'],
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*wheel_.*link"),
+            "make_consistent": True,
+        },
+    )
 
     # add_base_mass = EventTerm(
     #     func=mdp.randomize_rigid_body_mass,
@@ -518,36 +521,36 @@ class F1TenthOvertakeRewardsCfg:
     # Standard reward for progressing along centerline, weight=1
     progress_rew = RewTerm(
         func=progress_rew,
-        weight=0.1,
+        weight=1.0,
     )
     average_vel = RewTerm(
         func=average_vel,
-        weight=0.2,
+        weight=0.05,
     )
         
     wall_collision_penalty = RewTerm(
         func=wall_collision_penalty,
-        weight=1.0,
+        weight=0.5,
     )
 
     opponent_collision_penalty = RewTerm(
         func=opponent_collision_penalty,
-        weight=1.0,
+        weight=0.5,
     )
 
     opponent_overtake_completed_reward = RewTerm(
         func=opponent_overtake_completed_reward,
-        weight=100,
+        weight=500,
     )
     
     opponent_overtake_distance_reward = RewTerm(
         func=opponent_overtake_distance_reward,
-        weight=0.1,
+        weight=0.0,
     )
 
     # opponent_overtake_delta_distance_reward = RewTerm(
     #     func=opponent_overtake_delta_distance_reward,
-    #     weight=10,
+    #     weight=0.5,
     # )
 
     # opponent_mean_delta_speed = RewTerm(
@@ -567,24 +570,28 @@ class F1TenthOvertakeRewardsCfg:
     
     var_throttle_penalty =  RewTerm(
         func=var_throttle_penalty,
-        weight=0.05,
+        weight=0.01,
     )
     
     var_steering_penalty =  RewTerm(
         func=var_steering_penalty,
-        weight=1,
+        weight=0.001,
     )
 
     effort_throttle_penalty =  RewTerm(
         func=effort_throttle_penalty,
-        weight=0.01,
+        weight=0.0,
     )
     
     effort_steering_penalty =  RewTerm(
         func=effort_steering_penalty,
-        weight=0.2,
+        weight=0.001,
     )
 
+    effort_steering_penalty =  RewTerm(
+        func=effort_target_steering_angle_penalty,
+        weight=0.1,
+    )
     # low_speed_penalty =  RewTerm(
     #     func=low_speed_penalty,
     #     weight=0.0,
@@ -611,10 +618,10 @@ class OvertakeCurriculumCfg:
         func=increase_reward_weight_over_time,
         params={
             "reward_term_name": "progress_rew",
-            "weight_increase": -0.10,
-            "min_weight": 0.5,
-            "first_episode_increase": 50,
-            "episodes_per_increase": 50,
+            "weight_increase": -0.20,
+            "min_weight": 0.25,
+            "first_episode_increase": 25,
+            "episodes_per_increase": 25,
             "max_num_increases": MAX_NUM_INC,
         }
     )
@@ -623,11 +630,11 @@ class OvertakeCurriculumCfg:
         func=increase_reward_weight_over_time,
         params={
             "reward_term_name": "wall_collision_penalty",
-            "weight_increase": 0.25,
+            "weight_increase": 0.1,
             "max_weight": 5,
-            "first_episode_increase": 25,
-            "episodes_per_increase": 25,
-            "max_num_increases": 4,
+            "first_episode_increase":20,
+            "episodes_per_increase": 20,
+            "max_num_increases": MAX_NUM_INC,
         }
     )
 
@@ -635,11 +642,11 @@ class OvertakeCurriculumCfg:
         func=increase_reward_weight_over_time,
         params={
             "reward_term_name": "opponent_collision_penalty",
-            "weight_increase": 0.25,
+            "weight_increase": 0.1,
             "max_weight": 5,
-            "first_episode_increase": 25,
-            "episodes_per_increase": 25,
-            "max_num_increases": 8,
+            "first_episode_increase": 20,
+            "episodes_per_increase": 20,
+            "max_num_increases": MAX_NUM_INC,
         }
     )
 
@@ -695,7 +702,7 @@ class OvertakeCurriculumCfg:
         params={
             "reward_term_name": "var_steering_penalty",
             "weight_increase": 0.5,
-            "max_weight": 1.5,
+            "max_weight": 0.5,
             "first_episode_increase": 25,
             "episodes_per_increase": 25,
             "max_num_increases": MAX_NUM_INC,
@@ -770,7 +777,7 @@ class F1TenthOvertakeRLEnvCfg(ManagerBasedRLEnvCfg):
         print('[INFO]: F1TenthOvertakeRLEnvCfg class post init START')
 
         # viewer settings
-        self.viewer.eye = [0., 0.0, 75.0] 
+        self.viewer.eye = [0., 0.0, 30.0] 
         self.viewer.lookat = [0.0, 0.0, -3.]
         self.sim.dt = CONFIG['env_config']['SIM_DT']
         self.decimation = CONFIG['env_config']['SIM_DECIMATION']
@@ -780,7 +787,7 @@ class F1TenthOvertakeRLEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.render_interval = self.decimation
 
         # Terminations config
-        self.episode_length_s = CONFIG['env_config']['EPISODE_LENGTH_S']
+        self.episode_length_s = CONFIG['env_config']['EPISODE_LENGTH_S_OVERTAKE']
         self.actions.throttle_steer.scale = (CONFIG['env_config']['MAX_SPEED_SCALING'], CONFIG['env_config']['MAX_STEERING_SCALING'])
         self.actions.throttle_steer.offset = (CONFIG['env_config']['SPEED_OFFSET'], CONFIG['env_config']['STEERING_OFFSET'])
 
@@ -961,7 +968,12 @@ class F1TenthOvertakeEnv(ManagerBasedEnv):
             dtype=torch.float32,
             device=self.device
         )
-
+        
+        self._target_steering_angle_history = torch.zeros(
+            (self.num_envs, self._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            dtype=torch.float32,
+            device=self.device
+        )
         self._opponent_type = torch.zeros(
             self.num_envs,  # Shape: (num_envs, history_length, n_actions)
             dtype=torch.long,
@@ -1080,7 +1092,18 @@ class F1TenthOvertakeEnv(ManagerBasedEnv):
         self._wall_collision_counter = 0
 
         self._opponent_min_vel_scaling = CONFIG['env_config']['OPP_MIN_VEL_SCALING']
-                                
+
+        self._opponent_traj_x_shift = torch.zeros(
+            self.num_envs, 
+            dtype=torch.float32,
+            device=self.device
+        )        
+        self._opponent_traj_y_shift = torch.zeros(
+            self.num_envs, 
+            dtype=torch.float32,
+            device=self.device
+        )                            
+                
         ######################################################################
         ################# TRACK INFO STORED AS TENSOR IN LISTS ###############
         self._waypoints_list = [

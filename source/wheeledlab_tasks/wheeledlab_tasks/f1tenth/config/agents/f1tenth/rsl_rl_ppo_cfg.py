@@ -4,7 +4,7 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 @configclass
 class F1TenthTimeTrialPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     # Training hyperparameters (adjust as needed)
-    num_steps_per_env = 16
+    num_steps_per_env = 16 # 16 for 4096, 32 for 2048, 64 for 1024
     max_iterations = 1500
     save_interval = 50
     experiment_name = "ppo_f1tenth"
@@ -13,8 +13,8 @@ class F1TenthTimeTrialPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     # Policy architecture
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
-        actor_hidden_dims=[128, 128],
-        critic_hidden_dims=[256, 256],
+        actor_hidden_dims=[256, 256],
+        critic_hidden_dims=[512, 512],
         activation="elu",
     )
 
