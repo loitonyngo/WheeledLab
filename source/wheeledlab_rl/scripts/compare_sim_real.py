@@ -12,6 +12,9 @@ This command will save data and record a video of the playback using an existing
 ###################################
 ###### BEGIN ISAACLAB SPINUP ######
 ###################################
+import yaml
+with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/config/f1tenth_config.yaml", "r") as f:
+    CONFIG = yaml.safe_load(f)
 
 from wheeledlab_rl.startup import startup
 import argparse
@@ -30,15 +33,14 @@ parser = argparse.ArgumentParser(description="Play a policy in WheeledLab.")
 ###### DEFINE POLICY TO PLAY ######
 ###################################
 DEFAULT_LOGS_PATH = "/home/tongo/WheeledLab/source/wheeledlab_rl/logs/"
-POLICY = 'major-eon-1288'
+POLICY = 'TR2_TT_20hz_act01_02_fric065_del70_buffer1'
 SAVE_NAME = 'test'
 SAVE_DIR = '/home/tongo/WheeledLab/source/wheeledlab_rl/logs_play_policy'
 TIMESTAMP = datetime.now().strftime("%m%d_%H%M")
 
 REAL_DATA_DIR = "/home/tongo/WheeledLab/source/wheeledlab_rl/real_data/"
-REAL_DATA_NAME = "bb_speed_3_angle_3_p_2.csv"
-# REAL_DATA_NAME = "THETRACK_MAP_2.csv"
-# REAL_DATA_NAME = "speed_3_angle_0.csv"
+# REAL_DATA_NAME = "bb_speed_3_angle_3_p_2.csv"
+REAL_DATA_NAME = "0911_sysid_1.csv"
 
 REAL_DATA_PATH = os.path.join(REAL_DATA_DIR, REAL_DATA_NAME)
 ###################################
@@ -56,7 +58,7 @@ parser.add_argument("--task", type=str, default=None, help="Task name. Overrides
 parser.add_argument("--policy-path", type=str, default=None, help="Path to policy file.")
 
 # Playback
-parser.add_argument("--steps", type=int, default=115, help="Length of recorded video in steps")
+parser.add_argument("--steps", type=int, default=250, help="Length of recorded video in steps")
 # Logging
 parser.add_argument('-sd', "--save-data", action="store_true", default=True, help="Save episode data")
 parser.add_argument("--save-name", type=str, default=SAVE_NAME, help="Name save file.")
@@ -204,7 +206,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
         cmd_velocity = torch.tensor(real_data["cmd_velocity"].values)
         time_data = torch.tensor(real_data["Time"].values)
 
-    print(time_data)
     # Create new time points at fixed interval dt
     dt = env.cfg.sim.dt*env.cfg.decimation  # your desired time interval
     new_time = torch.arange(time_data.min(), time_data.max(), dt)
@@ -225,10 +226,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
 
             MAX_SPEED = 8
             MAX_ANGLE = 0.40
-            CMD_TO_REAL_MULTIPLIER_SPEED = 1.2  # This is the multiplier to convert command speed to real speed
+            CMD_TO_REAL_MULTIPLIER_SPEED = 1 # This is the multiplier to convert command speed to real speed
             CMD_TO_REAL_MULTIPLIER_ANGLE = 1  # This is the multiplier to convert command angle to real angle
-            actions[:,0] = cmd_velocity_resampled[time_idx+1]/MAX_SPEED / CMD_TO_REAL_MULTIPLIER_SPEED
-            actions[:,1] = cmd_steering_resampled[time_idx+1]/MAX_ANGLE / CMD_TO_REAL_MULTIPLIER_ANGLE
+            actions[:,0] = cmd_velocity_resampled[time_idx+1]/CONFIG['env_config']['MAX_SPEED_SCALING']/CMD_TO_REAL_MULTIPLIER_SPEED
+            actions[:,1] = cmd_steering_resampled[time_idx+1]/CONFIG['env_config']['MAX_STEERING_SCALING']/CMD_TO_REAL_MULTIPLIER_SPEED
             # env stepping
             obs, rew, _, extras = env.step(actions)
         # save data
@@ -374,6 +375,21 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     pos_xy[:,0] = pos_xy[:,0]-pos_xy[0,0]
     pos_xy[:,1] = pos_xy[:,1]-pos_xy[0,1]
 
+    # translate to origin
+    pos_xy = pos_xy - pos_xy[0]
+
+    # compute initial heading
+    dx, dy = pos_xy[1] - pos_xy[0]
+    init_angle = np.arctan2(dy, dx)
+
+    # rotation matrix to align heading with x-axis
+    R = np.array([
+        [np.cos(-init_angle), -np.sin(-init_angle)],
+        [np.sin(-init_angle),  np.cos(-init_angle)]
+    ])
+
+    # apply rotation
+    pos_xy = (R @ pos_xy.T).T
 
     vel = vel[sim_mask]                 # Trim vel accordingly
     acceleration = acceleration[sim_mask]  # Trim acceleration accordingly
@@ -415,7 +431,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     except:
         print('WARNING try except')
 
-
+    
     plt.figure(figsize=(15, 15))  # Adjusted height for 4 subplots
 
     # ---------------------------
@@ -423,9 +439,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     # ---------------------------
     ax1 = plt.subplot(4, 1, 1)
     ax1b = ax1.twinx()
-    print(real_data['Time'])
+    # print(real_data['Time'])
     # Plot velocity on ax1 (left y-axis)
-    ax1.plot(time[start_idx:end_idx], actions[start_idx:end_idx, 0, 0]*MAX_SPEED, 
+    ax1.plot(time[start_idx:end_idx], actions[start_idx:end_idx, 0, 0]*CONFIG['env_config']['MAX_SPEED_SCALING'], 
             color='green', label='Model cmd velocity')
     ax1.plot(real_data['Time'], real_data['cmd_velocity'], 
             color='green', linestyle='--', label='Real cmd velocity')
@@ -440,7 +456,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     #         color='red', label='effort')
     
     # Plot steering on ax1b (right y-axis)
-    ax1b.plot(time[start_idx:end_idx], actions[start_idx:end_idx, 0, 1]*MAX_ANGLE, 
+    ax1b.plot(time[start_idx:end_idx], actions[start_idx:end_idx, 0, 1]*CONFIG['env_config']['MAX_STEERING_SCALING'], 
             color='blue', label='Model cmd steering')
     ax1b.plot(real_data['Time'], real_data['cmd_steering_angle'], 
             color='blue', linestyle='--', label='Real cmd steering')

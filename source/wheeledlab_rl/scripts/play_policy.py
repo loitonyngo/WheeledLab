@@ -30,14 +30,14 @@ parser = argparse.ArgumentParser(description="Play a policy in WheeledLab.")
 ###### DEFINE POLICY TO PLAY ######
 ###################################
 DEFAULT_LOGS_PATH = "/home/tongo/WheeledLab/source/wheeledlab_rl/logs/"
-POLICY = "20250908_0039" 
+POLICY = "TR2_TT_20hz_act01_02_fric065_del70_buffer1" 
 SAVE_NAME = 'test'
 SAVE_DIR = '/home/tongo/WheeledLab/source/wheeledlab_rl/logs_play_policy'
 TIMESTAMP = datetime.now().strftime("%m%d_%H%M")
 
 ###################################
 ###################################
-###################################
+###################################f
 
 
 parser.add_argument('-p', "--run-path", type=str, 
@@ -50,7 +50,7 @@ parser.add_argument("--task", type=str, default=None, help="Task name. Overrides
 parser.add_argument("--policy-path", type=str, default=None, help="Path to policy file.")
 
 # Playback
-parser.add_argument("--steps", type=int, default=500, help="Length of recorded video in steps")
+parser.add_argument("--steps", type=int, default=200, help="Length of recorded video in steps")
 # Logging
 parser.add_argument('-sd', "--save-data", action="store_true", default=True, help="Save episode data")
 parser.add_argument("--save-name", type=str, default=SAVE_NAME, help="Name save file.")
@@ -169,6 +169,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
         'vel_y': [],
         'yaw_rate': [],
         'target_velocity': [],
+        'target_steering': [],
         'theta': [],
         's_idx': [],
         'time': [],
@@ -212,6 +213,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
             print('WARNING: could not store data')
         try:
             data['target_velocity'].append(extras['target_velocity'])
+            data['target_steering'].append(extras['target_steering'])
+
         except:
             print('WARNING: could not store data')
         try:
@@ -296,6 +299,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     vel_y_calc = torch.squeeze(data['vel_y_calc']).cpu().numpy()
     yaw_rate = torch.squeeze(data['yaw_rate']).cpu().numpy() 
     target_velocity = torch.squeeze(data['target_velocity']).cpu().numpy()
+    target_steering = torch.squeeze(data['target_steering']).cpu().numpy()
     
     vel = np.sqrt(np.square(vel_x) + np.square(vel_y))
     acceleration = np.gradient(vel[start_idx:end_idx], time[start_idx:end_idx])
@@ -324,11 +328,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     # Plot velocity on ax1 (left y-axis)
     # ax1.plot(time[start_idx:end_idx], (np.clip(actions[start_idx:end_idx, 0, 0], -0.5, 1))+vel_x[start_idx:end_idx], 
     #         color='green', label='Model cmd velocity')
-    ax1.plot(time[start_idx:end_idx], np.clip(actions[start_idx:end_idx, 0, 0], -0.5, 0.5), 
+    ax1.plot(time[start_idx:end_idx], target_velocity[start_idx:end_idx], 
             color='green', label='Model cmd velocity')
 
-    # Plot steering on ax1b (right y-axis)
-    ax1b.plot(time[start_idx:end_idx], actions[start_idx:end_idx, 0, 1], 
+    # # Plot steering on ax1b (right y-axis)
+    ax1b.plot(time[start_idx:end_idx],  target_steering[start_idx:end_idx], 
             color='blue', label='Model cmd steering')
 
     # Customize axes
@@ -351,6 +355,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     ax2b = ax2.twinx()
 
     # Plot linear velocities
+    ax2.plot(time[start_idx:end_idx], target_velocity[start_idx:end_idx], 
+            color='black', label='Model cmd velocity')
     ax2.plot(time[start_idx:end_idx], vel_x[start_idx:end_idx], 
             color='g', label='Lin Vel X (sim)')
     # ax2.plot(time[start_idx:end_idx], np.cumsum(np.clip(actions[start_idx:end_idx, 0, 0]*0.15, -0.15, 0.15)), 

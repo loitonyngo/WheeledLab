@@ -141,7 +141,7 @@ class AckermannAction(ActionTerm):
 
         # vel mode
         left_rotator_angle, right_rotator_angle, wheel_speeds = self._calculate_ackermann_angles_and_velocities(
-            target_velocity= self.processed_actions[:, 0], # Velocity for all cars
+            target_velocity= self.processed_actions[:, 0]/CONFIG['env_config']['SPEED_SIM_TO_REAL_SCALING'], # Velocity for all cars
             target_steering_angle=self.processed_actions[:, 1] # Steering angle for all cars
         )
         
@@ -338,7 +338,7 @@ class AckermannIncrementalAction(ActionTerm):
         # smoothed_action = alpha * new_action + (1 - alpha) * prev_action
         # steering_target = smoothed_action
         left_rotator_angle, right_rotator_angle, wheel_speeds = self._calculate_ackermann_angles_and_velocities(
-            target_velocity= self._target_velocity, # Velocity for all cars
+            target_velocity= self._target_velocity/CONFIG['env_config']['SPEED_SIM_TO_REAL_SCALING'], # Velocity for all cars
             target_steering_angle= self._target_steering_angle # Steering angle for all cars
         )
         

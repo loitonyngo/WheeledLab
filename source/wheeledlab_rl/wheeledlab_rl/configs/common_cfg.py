@@ -46,8 +46,8 @@ class TrainConfig:
     device: str = "cuda:0"              # Device to use
     load_run: Optional[str] = None    # Load a previously trained model
     load_run_checkpoint: int = 0        # Load a specific checkpoint from a previously trained model
-    # load_run: Optional[str] = "20250907_2338"      # Load a previously trained model
-    # load_run_checkpoint: int = 2200       # Load a
+    # load_run: Optional[str] = "GENERALIZE_TT_20hz_nbuffer10_nhorizon30delta5_genfric_genmass_normobs_v4"      # Load a previously trained model
+    # load_run_checkpoint: int = 950       # Load a
     
     log: LogConfig = LogConfig()
 

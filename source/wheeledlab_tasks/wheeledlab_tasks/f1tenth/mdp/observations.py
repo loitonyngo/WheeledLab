@@ -54,7 +54,8 @@ def base_lin_vel_x_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sce
     env._base_lin_vel_x_history[:, 1:] = env._base_lin_vel_x_history[:, :-1].clone()
     env._base_lin_vel_x_history[:, 0] = asset.data.root_lin_vel_b[:,0]
     base_lin_vel_x_history = env._base_lin_vel_x_history
-    return base_lin_vel_x_history
+    norm = 8.0
+    return base_lin_vel_x_history/norm
 
 def base_lin_vel_y_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
     """Root linear velocity in the asset's root frame. 2D, only x and y"""
@@ -90,8 +91,8 @@ def base_ang_vel_z_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sce
     env._base_ang_vel_z_history[:, 1:] = env._base_ang_vel_z_history[:, :-1].clone()
     env._base_ang_vel_z_history[:, 0] = asset.data.root_ang_vel_b[:,2]
     base_ang_vel_z_history = env._base_ang_vel_z_history
-    
-    return base_ang_vel_z_history
+    norm = 2.0
+    return base_ang_vel_z_history/norm
 
 def base_lin_acc_x_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
     """Root linear acceleration in the asset's root frame. 2D, only x and y"""
@@ -108,8 +109,8 @@ def base_lin_acc_x_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sce
     # shift the history to the right and insert the last angular velocity at the beginning
     env._base_lin_acc_x_history[:, 1:] = env._base_lin_acc_x_history[:, :-1].clone()
     env._base_lin_acc_x_history[:, 0]  = (env._base_lin_vel_x_history[:, 0] - env._base_lin_vel_x_history[:, 1])/(env.step_dt)
-
-    return env._base_lin_acc_x_history
+    norm = 3.0
+    return env._base_lin_acc_x_history/norm
 
 def target_velocity_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
     # extract the used quantities (to enable type-hinting)
@@ -131,8 +132,8 @@ def target_velocity_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sc
     # # shift the history to the right and insert the last angular velocity at the beginning
     env._target_velocity_history[:, 1:] = env._target_velocity_history[:, :-1].clone()
     env._target_velocity_history[:, 0] = torch.clamp(env._target_velocity_history[:, 0] + last_action, min = 0.0)
-
-    return env._target_velocity_history
+    norm = 8.0
+    return env._target_velocity_history/norm
 
 def target_steering_angle_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
     # extract the used quantities (to enable type-hinting)
@@ -149,8 +150,8 @@ def target_steering_angle_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCf
     # # shift the history to the right and insert the last angular velocity at the beginning
     env._target_steering_angle_history[:, 1:] = env._target_steering_angle_history[:, :-1].clone()
     env._target_steering_angle_history[:, 0] = torch.clamp(env._target_steering_angle_history[:, 0] + last_action, min = -0.4, max=0.4)
-
-    return env._target_steering_angle_history
+    norm = 0.4
+    return env._target_steering_angle_history/norm
 
 #last action is from -1 and 1, not clipped
 def action_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
@@ -297,7 +298,7 @@ def track_info_horizon(
         cross_prods = (track_dirs[:,:,0]*car_offsets[:,:,1] - track_dirs[:,:,1]*car_offsets[:,:,0])
         signs = torch.sign(cross_prods)
         distances = torch.abs(cross_prods) / (torch.norm(track_dirs, dim=2) + 1e-6)
-        deviation_obs[mask] = signs * distances
+        deviation_obs[mask] = signs * distances/1.5
 
         # --- 2) Heading error ---
         lookahead_pts = waypoints_xy_world[horizon_indices[:, 1:]]
@@ -309,17 +310,17 @@ def track_info_horizon(
             torch.sin(desired_headings - map_head.unsqueeze(-1)),
             torch.cos(desired_headings - map_head.unsqueeze(-1))
         )
-        heading_obs[mask] = heading_errors
+        heading_obs[mask] = heading_errors/3.14
 
         # --- 3) Lateral space (d_lat) ---
         d_lat = env._d_lat_list[map_level][:, :2]
         next_dlat = d_lat[horizon_indices[:, 1:], :]
-        dlat_obs[mask] = next_dlat.reshape(-1, n_horizon*2)
+        dlat_obs[mask] = next_dlat.reshape(-1, n_horizon*2)/1.5
 
         # --- 4) Curvature (kappa) ---
         kappa_radpm = env._kappa_radpm_list[map_level][:]
         next_kappa = kappa_radpm[horizon_indices[:, 1:]].squeeze(-1)
-        kappa_obs[mask] = next_kappa
+        kappa_obs[mask] = next_kappa/3.0
 
     # Stack everything together
     return torch.cat([deviation_obs, heading_obs, dlat_obs, kappa_obs], dim=-1)

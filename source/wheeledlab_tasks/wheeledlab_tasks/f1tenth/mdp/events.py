@@ -17,7 +17,8 @@ with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/f1ten
 # Common helpers
 # ---------------------------------------------------------------------------
         
-def _init_common_histories(env: ManagerBasedEnv):
+def _init_common_histories(env: ManagerBasedEnv,
+                           env_ids: torch.Tensor):
     """Initialize histories/buffers that are common across reset functions."""
     if not hasattr(env, '_map_levels'):
         env._map_levels = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
@@ -282,7 +283,8 @@ def reset_root_state_random(env: ManagerBasedEnv, env_ids: torch.Tensor, asset_c
     asset: RigidObject | Articulation = env.scene[asset_cfg.name]
     terrain: TerrainImporter = env.scene.terrain
 
-    _init_common_histories(env)
+    _init_common_histories(env, env_ids)
+    env._map_levels[env_ids] = torch.tensor(np.floor(np.random.rand(len(env_ids))*len(env.cfg.scene.terrain.waypoints_list)), device = env.device, dtype=torch.long)
 
     valid_poses, current_idx_np = terrain.cfg.generate_random_poses_from_waypoints(
         env=env, env_ids=env_ids, num_poses=len(env_ids), max_radius_offset=0.5
@@ -303,6 +305,7 @@ def reset_root_state_random_with_opponent(
     terrain: TerrainImporter = env.scene.terrain
 
     _init_common_histories(env)
+    env._map_levels[env_ids] = torch.tensor(np.floor(np.random.rand(len(env_ids))*len(env.cfg.scene.terrain.traversability_hashmap_list)), device = env.device, dtype=torch.long)
 
     ego_valid_poses, ego_idx_np, opp_valid_poses, opp_idx_np = terrain.cfg.generate_random_poses_from_waypoints_with_opponent(
         env=env, env_ids=env_ids, num_poses=len(env_ids), max_radius_offset=0.5

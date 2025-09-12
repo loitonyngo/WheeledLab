@@ -226,7 +226,7 @@ class F1TenthOvertakeTerrainImporterCfg(TerrainImporterCfg):
                 y + random.uniform(-1,1)*max_radius_offset, 
                 0.02),
                 rot_euler_xyz_deg=(0., 0., angle),
-                lin_vel=(0, 0, 0.0),  # Add linear velocity
+                lin_vel=(random.uniform(0,2), 0, 0.0),  # Add linear velocity
                 ang_vel=(0.0, 0.0, 0.0)  # Angular velocity is zero
             ) for (x, y, angle), (vx, vy) in zip(init_poses, ego_velocities)
         ]
@@ -445,62 +445,60 @@ class F1TenthOvertakeEventsCfg:
 
 @configclass
 class F1TenthOvertakeEventsRandomCfg(F1TenthOvertakeEventsCfg):
-    change_wheel_friction = EventTerm(
-        func=mdp.randomize_rigid_body_material,
-        mode="startup",
-        params={
-            "static_friction_range": (CONFIG['env_config']['STATIC_FRICTION']-CONFIG['env_config']['STD_FRICTION'], CONFIG['env_config']['STATIC_FRICTION']+CONFIG['env_config']['STD_FRICTION']),
-            "dynamic_friction_range": (CONFIG['env_config']['DYNAMIC_FRICTION']-CONFIG['env_config']['STD_FRICTION'], CONFIG['env_config']['DYNAMIC_FRICTION']+CONFIG['env_config']['STD_FRICTION']),
-            "restitution_range": (0.0, 0.0),
-            "num_buckets": CONFIG['env_config']['NUM_BUCKETS_FRICTION'],
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*wheel_.*link"),
-            "make_consistent": True,
-        },
-    )
+    
+    if CONFIG['env_config']['RANDOMIZE_FRICTION']:
+        change_wheel_friction = EventTerm(
+            func=mdp.randomize_rigid_body_material,
+            mode="startup",
+            params={
+                "static_friction_range": (CONFIG['env_config']['STATIC_FRICTION']-CONFIG['env_config']['STD_FRICTION'], CONFIG['env_config']['STATIC_FRICTION']+CONFIG['env_config']['STD_FRICTION']),
+                "dynamic_friction_range": (CONFIG['env_config']['DYNAMIC_FRICTION']-CONFIG['env_config']['STD_FRICTION'], CONFIG['env_config']['DYNAMIC_FRICTION']+CONFIG['env_config']['STD_FRICTION']),
+                "restitution_range": (0.0, 0.0),
+                "num_buckets": CONFIG['env_config']['NUM_BUCKETS_FRICTION'],
+                "asset_cfg": SceneEntityCfg("robot", body_names=".*wheel_.*link"),
+                "make_consistent": True,
+            },
+        )
 
-    # add_base_mass = EventTerm(
-    #     func=mdp.randomize_rigid_body_mass,
-    #     mode="startup",
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot", body_names=["base_link"]),
-    #         "mass_distribution_params": (0.0, 0.0),
-    #         "operation": "abs",
-    #     },
-    # )
+    # standard mass is 3.17 kg
+    if CONFIG['env_config']['RANDOMIZE_BODY_MASS']:
+        add_base_mass = EventTerm(
+            func=mdp.randomize_rigid_body_mass,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", body_names=["base_link"]),
+                "mass_distribution_params": (0.99, 1.01),
+                "operation": "scale",
+            },
+        )
+        
+    if CONFIG['env_config']['RANDOMIZE_ACTUATOR_STEERING_GAIN']:
+        # Randomize steering actuator gains with scaling
+        randomize_steering_gains = EventTerm(
+            func=mdp.randomize_actuator_gains,
+            mode="startup",  # apply once at environment reset
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=["rotator_(left|right)"]),
+                "stiffness_distribution_params": (0.9, 1.1),  # scale between 80% and 120%
+                "damping_distribution_params": (0.9, 1.1),
+                "operation": "scale",
+                "distribution": "uniform",
+            },
+        )
+        
+    if CONFIG['env_config']['RANDOMIZE_ACTUATOR_THROTTLE_GAIN']:
+        # Randomize throttle actuator damping with scaling
+        randomize_throttle_gains = EventTerm(
+            func=mdp.randomize_actuator_gains,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=[".*wheel_(back|front)_.*"]),
+                "damping_distribution_params": (0.9, 1.1),  # 80%–120% of default damping
+                "operation": "scale",
+                "distribution": "uniform",
+            },
+        )
 
-    # add_wheel_mass = EventTerm(
-    #     func=mdp.randomize_rigid_body_mass,
-    #     mode="startup",
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*wheel_.*link"),
-    #         "mass_distribution_params": (.0, 0.0),
-    #         "operation": "abs",
-    #     },
-    # )
-
-    # Override randomize_gains to target all four wheel motors (front and back)
-    # randomize_gains = EventTerm(
-    #     func=mdp.randomize_actuator_gains,
-    #     mode="startup",
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot", joint_names=["wheel_(back|front)_.*"]),
-    #         "damping_distribution_params": (0.0, 0.0),
-    #         "operation": "abs",
-    #     },
-    # )
-
-    # change_wheel_friction = EventTerm(
-    #     func=mdp.randomize_rigid_body_material,
-    #     mode="startup",
-    #     params={
-    #         "static_friction_range": (STATIC_FRICTION-0.1, STATIC_FRICTION+0.1),
-    #         "dynamic_friction_range": (DYNAMIC_FRICTION-0.1, DYNAMIC_FRICTION+0.1),
-    #         "restitution_range": (0.0, 0.0),
-    #         "num_buckets": 20,
-    #         "asset_cfg": SceneEntityCfg("robot", body_names="wheel.*"),
-    #         "make_consistent": True,
-    #     },
-    # )
 
     kill_lidar = EventTerm(
         func=disable_all_lidars,
@@ -525,7 +523,7 @@ class F1TenthOvertakeRewardsCfg:
     )
     average_vel = RewTerm(
         func=average_vel,
-        weight=0.05,
+        weight=0.08,
     )
         
     wall_collision_penalty = RewTerm(
@@ -533,6 +531,11 @@ class F1TenthOvertakeRewardsCfg:
         weight=0.5,
     )
 
+    soft_wall_collision_penalty = RewTerm(
+        func=soft_wall_collision_penalty,
+        weight=0.05,
+    )
+    
     opponent_collision_penalty = RewTerm(
         func=opponent_collision_penalty,
         weight=0.5,
@@ -596,15 +599,7 @@ class F1TenthOvertakeRewardsCfg:
     #     func=low_speed_penalty,
     #     weight=0.0,
     # )
-    if CONFIG['env_config']['CONSTANT_SPEED']:
-        # # # Reward terms to test various frictions, simple task (constant velocity and steering, drive in circle)
-        speed_target_rew = RewTerm(
-            func=speed_target_rew,
-            params={
-                "speed_target": CONFIG['env_config']['CONSTANT_SPEED_TARGET']
-            },
-            weight= 1.,
-        )
+
 
 ########################
 ###### CURRICULUM ######
@@ -777,7 +772,7 @@ class F1TenthOvertakeRLEnvCfg(ManagerBasedRLEnvCfg):
         print('[INFO]: F1TenthOvertakeRLEnvCfg class post init START')
 
         # viewer settings
-        self.viewer.eye = [0., 0.0, 30.0] 
+        self.viewer.eye = [0., 0.0, 40.0] 
         self.viewer.lookat = [0.0, 0.0, -3.]
         self.sim.dt = CONFIG['env_config']['SIM_DT']
         self.decimation = CONFIG['env_config']['SIM_DECIMATION']

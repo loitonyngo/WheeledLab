@@ -1,88 +1,101 @@
 # config.yaml
 env_config:
-  MAP_NAME_LIST: ['ITA']
-  ORIGIN_LIST: [[0, 0], [0, 0], [0, 0], [0, 0]]
+  # MAP_NAME_LIST: ['ITA', 'MZN', 'BAH', 'SPA', 'BRA', 'DAY', 'JED', 'SPE_R', 'SPE', 'THETRACK', 'icra25_v6', 'DCRL', 'CHN', 'TEST_1', 'GLC_smile_small', 'GLC_pit_rbring1', 'IND', 'SAU', 'SAU_R', 'OVA', 'OVA_R', 'CAT', 'TRE']
+  MAP_NAME_LIST: ['TR2']
 
+  ORIGIN_LIST: [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]] 
+  TRAJ_VISIBLE: False
+  BOUNDARY_VISIBLE: True
   # When comparing real data that don't use incremental it must always be set to False
   INCREMENTAL_MODE: True
-
-  MAX_SPEED_INCREMENT: 0.05
-  MAX_STEERING_ANGLE_INCREMENT: 0.010
-  MAX_SPEED_SCALING: 8
-  MAX_STEERING_SCALING: 0.40
-  SPEED_OFFSET: 0
-  STEERING_OFFSET: 0.0
-  VD_ENHANCED: False
-
-  DYNAMIC_FRICTION: 0.7
-  STATIC_FRICTION: 0.7
-  STD_FRICTION: 0.00
-  NUM_BUCKETS_FRICTION: 1000
-  RESTITUTION: 0.0
-
-  CONSTANT_SPEED: False
-  CONSTANT_SPEED_TARGET: 5
-
   # usually both true
   NON_TRAVERSABLE_TERMINATION: True
   RESET_RANDOM: True
   PLAY_POLICY: False
 
+  # Actutators limits
+  MAX_SPEED_INCREMENT: 0.06
+  MAX_STEERING_ANGLE_INCREMENT: 0.1
+  MAX_SPEED_SCALING: 8
+  MAX_STEERING_SCALING: 0.45
+  SPEED_SIM_TO_REAL_SCALING: 1.2
+  SPEED_OFFSET: 0
+  STEERING_OFFSET: 0.05
+  VD_ENHANCED: False
+
+  RANDOMIZE_FRICTION: False
+  DYNAMIC_FRICTION: 0.60
+  STATIC_FRICTION: 0.60
+  STD_FRICTION: 0.05
+  NUM_BUCKETS_FRICTION: 10000
+  RESTITUTION: 0.0
+
+  RANDOMIZE_BODY_MASS: False
+  MIN_MASS_SCALE: 0.99
+  MAX_MASS_SCALE: 1.01
+  RANDOMIZE_ACTUATOR_STEERING_GAIN: False
+  RANDOMIZE_ACTUATOR_THROTTLE_GAIN: False
+
+
+
   # SIM_DT: Physics simulation time step
   # SIM_DECIMATION: Number of physics steps per simulation step; 
   # The actions, observations, and rewards are computed every SIM_DECIMATION steps, and every SIM_DECIMATION*SIM_DT seconds.
-  EPISODE_LENGTH_S_TIMETRIAL: 10
+  EPISODE_LENGTH_S_TIMETRIAL: 8
   EPISODE_LENGTH_S_OVERTAKE: 30
   SIM_DT: 0.005
-  SIM_DECIMATION: 5
+  SIM_DECIMATION: 10
   # SIM_DT: 0.01
   # SIM_DECIMATION: 8
 
-  LEN_S_IDX: 0.1 
+  LEN_S_IDX: 0.1 # DON'T CHANGE!
   # SIM_DT: 0.003125
 
-  MIN_DELAY_STEERING: 30 #sim dt steps -> 30 (MIN_DELAY_STEERING) * 0.005 s(SIM_DT) = 0.15s delay
-  MAX_DELAY_STEERING: 30
-  MIN_DELAY_THROTTLE: 10 #sim dt steps
+  MIN_DELAY_STEERING: 70 # sim dt steps, e.g. 0.005*60 = 0.30s
+  MAX_DELAY_STEERING: 70
+
+  MIN_DELAY_THROTTLE: 10  #sim dt steps
   MAX_DELAY_THROTTLE: 10
 
-  ACTION_HISTORY_LENGTH: 10
+
+  ACTION_HISTORY_LENGTH: 10 # SIM_DT*SIM_DECIMATION*ACTION_HISTORY_LENGTH, e.g 0.005*10*10 = 0.5s
   OBS_HISTORY_LENGTH: 10
-  REW_HISTORY_LENGTH: 20
+  REW_HISTORY_LENGTH: 10
 
   # Overtake is completed if for every step in REW_HISTORY_LENGTH the opponent is ahead by this idx
   # Wall and Opponent collision is signaled after CHECK_IDX steps they actually happened
-  PROGRESS_HISTORY_CHECK_IDX: 4
-  WALL_COLLISION_CHECK_IDX: 1
-  OPPONENT_COLLISION_CHECK_IDX: 1
+  PROGRESS_HISTORY_CHECK_IDX: 5
+  WALL_COLLISION_CHECK_IDX: 9
+  OPPONENT_COLLISION_CHECK_IDX: 9
 
   # Min distance allowable to walls (otherwise collision)
-  WALL_COLLISION_RADIUS: 0.35
+  HARD_WALL_COLLISION_RADIUS: 0.45
+  SOFT_WALL_COLLISION_RADIUS: 0.45
   
   # Max progress allowable (in idx), otherwise we consider it corner cutting
-  MAX_PROGRESS_IDX: 30 
+  MAX_PROGRESS_IDX: 10 
 
   # True if lookahed changes with current velocity
   DYNAMIC_LOOKAHEAD: False
-  N_HORIZON: 20 # Number of waypoints for horizon
+  N_HORIZON: 30 # Number of waypoints for horizon
   # Otherwise use constant idx steps (s_horizon = delta_s_idx [0.1m/idx] * N_horizon_idx [idx])
-  DELTA_S_IDX: 10
+  DELTA_S_IDX: 5
   T_HORIZON: 4
 
 ############### OPPONENT OVERTAKE
   OPP_SIZE_RADIUS: 0.20
   OPP_MOVE_DT: 0.1
   OPP_COLLISION_RADIUS: 0.40
-  OPP_FRONT_COLLISION_RADIUS: 0.70
-  OPP_LAT_COLLISION_RADIUS: 0.45
-  CROSS_POS_LIM: 0.25
+  OPP_FRONT_COLLISION_RADIUS: 0.65
+  OPP_LAT_COLLISION_RADIUS: 0.40
+  CROSS_POS_LIM: 0.18
 
   OPP_GENERALIZATION: True
   OPP_TRAJ: "min_curv"
   OPPONENT_TRAJ_XY_SHIFT_MAX: 0.3
   OPP_INIT_VEL_SCALING: 0.1
   OPP_MIN_VEL_SCALING: 0.1
-  OPP_STD_VEL_SCALING: 0.3
+  OPP_STD_VEL_SCALING: 0.4
   OPP_VEL_SCALING_INCREMENT: 0.025
   OPP_VEL_SCALING_DECREASE: 0.000
   OT_COLLISION_RATIO_LVL_UP: 0.41
@@ -91,8 +104,8 @@ env_config:
   
   OPPONENT_STARTS_MOVING_AFTER_STEP: 20
   # OPPONENT_INIT_DISTANCE_IDX: 40
-  OPPONENT_INIT_DISTANCE_IDX_MAX: 60
-  OPPONENT_INIT_DISTANCE_IDX_MIN: 10
+  OPPONENT_INIT_DISTANCE_IDX_MAX: 70
+  OPPONENT_INIT_DISTANCE_IDX_MIN: 8
   OPPONENT_FAR_AWAY_IDX: 90
   OPPONENT_OVERTAKEN_IDX: 10
   OPPONENT_ALWAYS_AHEAD_PERCENTAGE: 0.01

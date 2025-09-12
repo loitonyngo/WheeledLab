@@ -82,7 +82,7 @@ class F1TenthTimeTrialObsCfg:
         base_lin_vel_x_history = ObsTerm(
             func=base_lin_vel_x_history, 
             params={'mean_noise': 0,
-                    'std_noise': 0.0}            
+                    'std_noise': 0.05}            
             )
 
         base_lin_acc_x_history = ObsTerm(
@@ -94,7 +94,7 @@ class F1TenthTimeTrialObsCfg:
         base_ang_vel_z_history = ObsTerm(
             func=base_ang_vel_z_history, 
             params={'mean_noise': 0,
-                    'std_noise': 0}         
+                    'std_noise': 0.02}         
             )
 
         target_velocity_history = ObsTerm(
@@ -233,7 +233,8 @@ class F1TenthTimeTrialTerrainImporterCfg(TerrainImporterCfg):
         valid_init_poses = [
             InitialPoseCfg(
                 pos=(x + random.uniform(-1,1)*max_radius_offset, y + random.uniform(-1,1)*max_radius_offset, 0.02),
-                rot_euler_xyz_deg=(0., 0., angle)
+                rot_euler_xyz_deg=(0., 0., angle),
+                lin_vel=(random.uniform(0,2), 0, 0.0),  # Add linear velocity
             ) for x, y, angle in init_poses
         ]
         return valid_init_poses, init_current_wps_idx
@@ -277,7 +278,7 @@ class F1TenthTimeTrialSceneCfg(InteractiveSceneCfg):
     # Add light configuration
     light = AssetBaseCfg(
         prim_path="/World/light",
-        spawn=sim_utils.DistantLightCfg(color=(0.5, 0.5, 0.5), intensity=1500.0),
+        spawn=sim_utils.DistantLightCfg(color=(0.5, 0.5, 0.5), intensity=500.0),
     )
 
     robot: AssetBaseCfg = F1TENTH_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
@@ -344,36 +345,68 @@ class F1TenthTimeTrialEventsCfg:
 
 @configclass
 class F1TenthTimeTrialEventsRandomCfg(F1TenthTimeTrialEventsCfg):
-    # change_wheel_friction = EventTerm(
-    #     func=mdp.randomize_rigid_body_material,
-    #     mode="startup",
-    #     params={
-    #         "static_friction_range": (0.67, 0.73),
-    #         "dynamic_friction_range": (0.67, 0.73),
-    #         "restitution_range": (0.0, 0.0),
-    #         "num_buckets": 1000,
-    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*wheel_.*link"),
-    #         "make_consistent": True,
-    #     },
-    # )
+    
+    if CONFIG['env_config']['RANDOMIZE_FRICTION']:
+        change_wheel_friction = EventTerm(
+            func=mdp.randomize_rigid_body_material,
+            mode="startup",
+            params={
+                "static_friction_range": (CONFIG['env_config']['STATIC_FRICTION']-CONFIG['env_config']['STD_FRICTION'], CONFIG['env_config']['STATIC_FRICTION']+CONFIG['env_config']['STD_FRICTION']),
+                "dynamic_friction_range": (CONFIG['env_config']['DYNAMIC_FRICTION']-CONFIG['env_config']['STD_FRICTION'], CONFIG['env_config']['DYNAMIC_FRICTION']+CONFIG['env_config']['STD_FRICTION']),
+                "restitution_range": (0.0, 0.0),
+                "num_buckets": CONFIG['env_config']['NUM_BUCKETS_FRICTION'],
+                "asset_cfg": SceneEntityCfg("robot", body_names=".*wheel_.*link"),
+                "make_consistent": True,
+            },
+        )
 
-    # add_base_mass = EventTerm(
-    #     func=mdp.randomize_rigid_body_mass,
-    #     mode="startup",
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot", body_names=["base_link"]),
-    #         "mass_distribution_params": (0.0, 0.0),
-    #         "operation": "abs",
-    #     },
-    # )
+    # standard mass is 3.17 kg
+    if CONFIG['env_config']['RANDOMIZE_BODY_MASS']:
+        add_base_mass = EventTerm(
+            func=mdp.randomize_rigid_body_mass,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", body_names=["base_link"]),
+                "mass_distribution_params": (['MIN_MASS_SCALE'], ['MAX_MASS_SCALE']),
+                "operation": "scale",
+            },
+        )
+        
+    # if CONFIG['env_config']['RANDOMIZE_ACTUATOR_STEERING_GAIN']:
+    #     # Randomize steering actuator gains with scaling
+    #     randomize_steering_gains = EventTerm(
+    #         func=mdp.randomize_actuator_gains,
+    #         mode="startup",  # apply once at environment reset
+    #         params={
+    #             "asset_cfg": SceneEntityCfg("robot", joint_names=["rotator_(left|right)"]),
+    #             "stiffness_distribution_params": (0.98, 1.02),  # scale between 80% and 120%
+    #             "damping_distribution_params": (0.98, 1.02),
+    #             "operation": "scale",
+    #             "distribution": "uniform",
+    #         },
+    #     )
+        
+    # if CONFIG['env_config']['RANDOMIZE_ACTUATOR_THROTTLE_GAIN']:
+    #     # Randomize throttle actuator damping with scaling
+    #     randomize_throttle_gains = EventTerm(
+    #         func=mdp.randomize_actuator_gains,
+    #         mode="startup",
+    #         params={
+    #             "asset_cfg": SceneEntityCfg("robot", joint_names=[".*wheel_(back|front)_.*"]),
+    #             "damping_distribution_params": (0.98, 1.02),  # 80%–120% of default damping
+    #             "operation": "scale",
+    #             "distribution": "uniform",
+    #         },
+    #     )
 
+    # standard mass is 0.1 kg
     # add_wheel_mass = EventTerm(
     #     func=mdp.randomize_rigid_body_mass,
     #     mode="startup",
     #     params={
     #         "asset_cfg": SceneEntityCfg("robot", body_names=".*wheel_.*link"),
     #         "mass_distribution_params": (.0, 0.0),
-    #         "operation": "abs",
+    #         "operation": "scale",
     #     },
     # )
 
@@ -424,17 +457,22 @@ class F1TenthTimeTrialRewardsCfg:
         
     wall_collision_penalty = RewTerm(
         func=wall_collision_penalty,
-        weight=1.0,
+        weight=2,
     )
+
+    # soft_wall_collision_penalty = RewTerm(
+    #     func=soft_wall_collision_penalty,
+    #     weight=0.5,
+    # )
 
     var_throttle_penalty =  RewTerm(
         func=var_throttle_penalty,
-        weight=0.005,
+        weight=0.001,
     )
 
     var_steering_penalty =  RewTerm(
         func=var_steering_penalty,
-        weight=0.0001,
+        weight=0.05,
     )
 
     effort_throttle_penalty =  RewTerm(
@@ -443,8 +481,13 @@ class F1TenthTimeTrialRewardsCfg:
     )
     
     effort_steering_penalty =  RewTerm(
+        func=effort_steering_penalty,
+        weight=0.05,
+    )
+
+    effort_abs_steering_penalty =  RewTerm(
         func=effort_target_steering_angle_penalty,
-        weight=0.5,
+        weight=0.001,
     )
     # delta_steering_l2_penalty =  RewTerm(
     #     func=delta_steering_l2_penalty,
@@ -464,17 +507,6 @@ class F1TenthTimeTrialRewardsCfg:
     #     func=delta_throttle_l2_penalty,
     #     weight=0.0,
     # )
-
-
-    if CONFIG['env_config']['CONSTANT_SPEED']:
-        # # # Reward terms to test various frictions, simple task (constant velocity and steering, drive in circle)
-        speed_target_rew = RewTerm(
-            func=speed_target_rew,
-            params={
-                "speed_target": CONFIG['env_config']['CONSTANT_SPEED_TARGET']
-            },
-            weight= 1.,
-        )
 
 ########################
 ###### CURRICULUM ######
@@ -516,7 +548,7 @@ class TimeTrialCurriculumCfg:
             "weight_increase": 0.5,
             "first_episode_increase": 500,
             "episodes_per_increase": 500,
-            "max_num_increases": 3,
+            "max_num_increases": 0,
         }
     )
     
@@ -539,7 +571,7 @@ class TimeTrialCurriculumCfg:
             "max_weight": 2,
             "first_episode_increase": 250,
             "episodes_per_increase": 250,
-            "max_num_increases": 10,
+            "max_num_increases": 0,
         }
     )
 
@@ -551,7 +583,7 @@ class TimeTrialCurriculumCfg:
             "max_weight": 2,
             "start_increase_after_n_steps" : 500,
             "steps_per_increase" : 250,
-            "max_num_increases": 10,
+            "max_num_increases": 0,
         }
     )
     
@@ -564,7 +596,7 @@ class TimeTrialCurriculumCfg:
             "max_weight": 1,
             "first_episode_increase": 500,
             "episodes_per_increase": 500,
-            "max_num_increases": 10,
+            "max_num_increases": 0,
         }
     )
         
@@ -662,14 +694,14 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
         print('[INFO]: F1TenthTimeTrialRLEnvCfg class post init START')
 
         # viewer settings
-        self.viewer.eye = [0., 0.0, 60.0] 
+        self.viewer.eye = [0., 0.0, 70.0] 
         self.viewer.lookat = [0.0, 0.0, -3.]
         self.sim.dt = CONFIG['env_config']['SIM_DT']
         self.decimation = CONFIG['env_config']['SIM_DECIMATION']
         # self.sim.dt = 0.025/2
         # self.decimation = 2
         # self.sim.render_interval = self.decimation
-        self.sim.render_interval = self.decimation
+        self.sim.render_interval = 2
 
         # Terminations config
         self.episode_length_s = CONFIG['env_config']['EPISODE_LENGTH_S_TIMETRIAL']

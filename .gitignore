@@ -11,7 +11,8 @@ source/wheeledlab_assets/data/waypoints_f.usd
 .gitignore
 source/wheeledlab_assets/data/waypoints.usd
 source/wheeledlab_tasks/wheeledlab_tasks/timetrial/utils/maps
-source/wheeledlab_assets/data/Robots/
+source/wheeledlab_assets/data/maps/
+source/wheeledlab_assets/data/Robots/UWPRL/
 source/wheeledlab_rl/logs_play_policy/
 source/wheeledlab_rl/logs_play_policy/
 source/wheeledlab_rl/real_data/

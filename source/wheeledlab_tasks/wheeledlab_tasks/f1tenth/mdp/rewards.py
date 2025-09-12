@@ -62,8 +62,71 @@ def wall_collision_penalty(env):
 
 
         # Check for collisions with inner and outer bounds
-        collision_with_inner = abs(dist_from_inner) < CONFIG['env_config']['WALL_COLLISION_RADIUS']
-        collision_with_outer = abs(dist_from_outer) < CONFIG['env_config']['WALL_COLLISION_RADIUS']
+        collision_with_inner = abs(dist_from_inner) < CONFIG['env_config']['HARD_WALL_COLLISION_RADIUS']
+        collision_with_outer = abs(dist_from_outer) < CONFIG['env_config']['HARD_WALL_COLLISION_RADIUS']
+        
+        # Combine collisions (OR operation - collision with either counts)
+        collisions_in_map = collision_with_inner | collision_with_outer
+        
+        # Convert collisions to long dtype (0 or 1)
+        collisions_in_map = collisions_in_map.long()
+        
+        # Update the collision_bool tensor for these environments
+        collision_bool[env_mask] = collisions_in_map
+
+    # vel_x = mdp.base_lin_vel(env)[:, 0]
+    return torch.where(collision_bool.bool(), -1, 0)
+
+def soft_wall_collision_penalty(env):
+    pos_xy_world = mdp.root_pos_w(env)[..., :2]
+    num_envs = pos_xy_world.shape[0]
+
+    if not hasattr(env, '_map_levels'):
+        env._map_levels = torch.zeros(env.num_envs, 
+                                dtype=torch.long,
+                                device=env.device)
+    if not hasattr(env, '_outer_list'):
+        env._outer_list = [
+            torch.tensor(outer, device=env.device, dtype=torch.float32)
+            for outer in env.scene.terrain.cfg.outer_list
+        ]
+    if not hasattr(env, '_inner_list'):
+        env._inner_list = [
+            torch.tensor(inner, device=env.device, dtype=torch.float32)
+            for inner in env.scene.terrain.cfg.inner_list
+        ]        
+        
+    # Get map levels for all environments
+    map_levels = env._map_levels  # shape: [num_envs]
+    unique_map_levels = torch.unique(map_levels)
+
+    collision_bool = torch.zeros(env.num_envs, 
+                                dtype=torch.long,
+                                device=env.device)
+    
+    for map_level in unique_map_levels:
+        # Create mask for environments using this map
+        env_mask = (map_levels == map_level)
+        num_envs_in_map = env_mask.sum()
+        
+        if num_envs_in_map == 0:
+            continue
+            
+        # Get positions for these environments
+        map_positions = pos_xy_world[env_mask]
+        
+        # Get waypoints for this map level
+        inner_xy_world = env._inner_list[map_level][:, :2]
+        outer_xy_world = env._outer_list[map_level][:, :2]
+
+        # Find nearest waypoint for these environments
+        nearest_to_inner_idx, dist_from_inner = find_frenet_coord_along_waypoints(inner_xy_world, map_positions)  # shape: [num_envs_in_map]
+        nearest_to_outer_idx, dist_from_outer = find_frenet_coord_along_waypoints(outer_xy_world, map_positions)  # shape: [num_envs_in_map]
+
+
+        # Check for collisions with inner and outer bounds
+        collision_with_inner = abs(dist_from_inner) < CONFIG['env_config']['SOFT_WALL_COLLISION_RADIUS']
+        collision_with_outer = abs(dist_from_outer) < CONFIG['env_config']['SOFT_WALL_COLLISION_RADIUS']
         
         # Combine collisions (OR operation - collision with either counts)
         collisions_in_map = collision_with_inner | collision_with_outer
@@ -721,8 +784,8 @@ def progress_waypoint_bool(env):
     env.extras['pos_xy'] = position_xy_world
     env.extras['vel_x'] = asset.data.root_lin_vel_b[:,0]
     env.extras['vel_y'] = -asset.data.root_lin_vel_b[:,1]
-    env.extras['target_velocity'] = env._target_velocity_history[:, 0]
-    env.extras['target_steering'] = env._target_steering_angle_history[:, 0]
+    env.extras['target_velocity'] = env._target_velocity_history[:, 0].clone()
+    env.extras['target_steering'] = env._target_steering_angle_history[:, 0].clone()
 
     env.extras['yaw_rate'] = asset.data.root_ang_vel_b[:,2]
     env.extras['s_idx'] = current_idx.clone()

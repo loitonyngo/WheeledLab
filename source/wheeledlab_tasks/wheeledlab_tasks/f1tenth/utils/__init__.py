@@ -74,7 +74,7 @@ def create_maps_from_waypoints(maps_folder_path, map_name_list, origin_list, sta
     opp_traj_center_list = []
     opp_traj_iqp_list = []
     opp_traj_sp_list = []
-    
+    z_waypoints = 0.0
     for i, (map_name, data) in enumerate(zip(map_name_list, map_data)):
         # Create drivable map
         hashmap, map_size_meters, map_size_pixels, (x_min, x_max), (y_min, y_max), res = create_square_drivable_map_v2(
@@ -88,34 +88,59 @@ def create_maps_from_waypoints(maps_folder_path, map_name_list, origin_list, sta
         # )
         
         # Convert points to USD coordinates
-        waypoints_usd = set_points_usd(
-            data['waypoints'], map_name, 'waypoints', origin_list[i], 
-            stage, [(1.0, 0.0, 0.0)], radius=0.05
-        )
-        outer_usd = set_points_usd(
-            data['outer'], map_name, 'outer', origin_list[i], 
-            stage, [(0.0, 1.0, 0.0)], radius=0.2
-        )
-        inner_usd = set_points_usd(
-            data['inner'], map_name, 'inner', origin_list[i], 
-            stage, [(0.25, 1.0, 0.0)], radius=0.2
-        )
+        if CONFIG['env_config']['BOUNDARY_VISIBLE']:
+            outer_usd = set_points_usd(
+                data['outer'], map_name, 'outer', origin_list[i], 
+                stage, [(0.0, 1.0, 0.0)], radius=0.2, height=z_waypoints
+            )
+            inner_usd = set_points_usd(
+                data['inner'], map_name, 'inner', origin_list[i], 
+                stage, [(0.25, 1.0, 0.0)], radius=0.2, height=z_waypoints
+            )
+        else:
+            outer_usd = set_points_usd(
+                data['outer'], map_name, 'outer', origin_list[i], 
+                stage, [(0.0, 1.0, 0.0)], radius=0, height=z_waypoints
+            )
+            inner_usd = set_points_usd(
+                data['inner'], map_name, 'inner', origin_list[i], 
+                stage, [(0.25, 1.0, 0.0)], radius=0, height=z_waypoints
+            )
+            
+        if CONFIG['env_config']['TRAJ_VISIBLE']:
+            waypoints_usd = set_points_usd(
+                data['waypoints'], map_name, 'waypoints', origin_list[i], 
+                stage, [(1.0, 0.0, 0.0)], radius=0.05, height=z_waypoints
+            )
+            opp_traj_iqp_usd = set_points_usd(
+                data['opp_traj_iqp'][:,0:2], map_name, 'opp_traj_iqp', origin_list[i], 
+                stage, [(1.0, 1.0, 0.0)], radius=0.05, height=z_waypoints
+            )
+            opp_traj_sp_usd = set_points_usd(
+                data['opp_traj_sp'][:,0:2], map_name, 'opp_traj_sp', origin_list[i], 
+                stage, [(0.0, 1.0, 1.0)], radius=0.05, height=z_waypoints
+            )
+        else:
+            waypoints_usd = set_points_usd(
+                data['waypoints'], map_name, 'waypoints', origin_list[i], 
+                stage, [(1.0, 0.0, 0.0)], radius=0, height=z_waypoints
+            )
+            opp_traj_iqp_usd = set_points_usd(
+                data['opp_traj_iqp'][:,0:2], map_name, 'opp_traj_iqp', origin_list[i], 
+                stage, [(1.0, 1.0, 0.0)], radius=0, height=z_waypoints
+            )
+            opp_traj_sp_usd = set_points_usd(
+                data['opp_traj_sp'][:,0:2], map_name, 'opp_traj_sp', origin_list[i], 
+                stage, [(0.0, 1.0, 1.0)], radius=0, height=z_waypoints
+            )
 
-        opp_traj_iqp_usd = set_points_usd(
-            data['opp_traj_iqp'][:,0:2], map_name, 'opp_traj_iqp', origin_list[i], 
-            stage, [(1.0, 1.0, 0.0)], radius=0.05
-        )
-        opp_traj_sp_usd = set_points_usd(
-            data['opp_traj_sp'][:,0:2], map_name, 'opp_traj_sp', origin_list[i], 
-            stage, [(0.0, 1.0, 1.0)], radius=0.05
-        )
-
+        z_waypoints += 0.3
         
         # Store results (convert to lists at the end)
         hashmap_list.append([])
-        waypoints_list.append([[p[0], p[1], p[2]] for p in waypoints_usd])
-        outer_list.append([[p[0], p[1], p[2]] for p in outer_usd])
-        inner_list.append([[p[0], p[1], p[2]] for p in inner_usd])
+        waypoints_list.append([[p[0], p[1], 0] for p in waypoints_usd])
+        outer_list.append([[p[0], p[1], 0] for p in outer_usd])
+        inner_list.append([[p[0], p[1], 0] for p in inner_usd])
         d_lat_list.append(data['d_lat'].tolist())
         psi_rad_list.append(data['psi_rad'].tolist())
         kappa_radpm_list.append(data['kappa_radpm'].tolist())

@@ -13,8 +13,8 @@ class F1TenthTimeTrialPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     # Policy architecture
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
-        actor_hidden_dims=[256, 256],
-        critic_hidden_dims=[512, 512],
+        actor_hidden_dims=[512, 512],
+        critic_hidden_dims=[1024, 512, 512],
         activation="elu",
     )
 
@@ -26,7 +26,7 @@ class F1TenthTimeTrialPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         entropy_coef=0.01,
         num_learning_epochs=10,
         num_mini_batches=64,
-        learning_rate=5.0e-4,
+        learning_rate=1.0e-4,
         schedule="adaptive",
         gamma=0.99,
         lam=0.95,
