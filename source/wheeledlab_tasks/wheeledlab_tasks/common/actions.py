@@ -20,9 +20,9 @@ class F1Tenth4WDActionCfg:
             "rotator_left",
             "rotator_right",
         ],
-        base_length=0.365, # 32
-        base_width=0.284, # half wheel 25, including full wheel 29
-        wheel_radius=0.055, # wheelwidth = 0.045
+        base_length=0.32, # 32
+        base_width=0.25, # half wheel 25, including full wheel 29
+        wheel_radius=0.0525, # wheelwidth = 0.045, 0.0575
         scale=(10.0, 0.40),
         no_reverse=True,
         bounding_strategy="clip",
@@ -45,7 +45,7 @@ class Mushr4WDActionCfg:
         ],
         base_length=0.325,
         base_width=0.2,
-        wheel_radius=0.05,
+        wheel_radius=0.04,
         scale=(10.0, 0.488),
         no_reverse=True,
         bounding_strategy="clip",
@@ -68,7 +68,7 @@ class LB4WDActionCfg:
         ],
         base_length=0.34,
         base_width=0.28,
-        wheel_radius=0.05,
+        wheel_radius=0.055,
         scale=(10.0, 0.488),
         no_reverse=True,
         bounding_strategy="clip",

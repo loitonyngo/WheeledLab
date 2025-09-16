@@ -94,5 +94,5 @@ class RCCar4WDIncrementalAction(ackermann_actions.AckermannIncrementalAction):
 
         # Calculate target rotation for each wheel based on its velocity
         wheel_speeds = torch.stack([v_back_left, v_back_right, v_front_left, v_front_right], dim=1)
-        # self._asset.data.root_lin_vel_b[:, 0] is the actual velocity
+
         return delta_left, delta_right, wheel_speeds

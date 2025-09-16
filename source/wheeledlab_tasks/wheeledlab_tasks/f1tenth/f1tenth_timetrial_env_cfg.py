@@ -82,32 +82,29 @@ class F1TenthTimeTrialObsCfg:
         base_lin_vel_x_history = ObsTerm(
             func=base_lin_vel_x_history, 
             params={'mean_noise': 0,
-                    'std_noise': 0.05}            
-            )
-
-        base_lin_acc_x_history = ObsTerm(
-            func=base_lin_acc_x_history, 
-            params={'mean_noise': 0,
-                    'std_noise': 0}            
+                    'std_noise': 0.0}            
             )
         
         base_ang_vel_z_history = ObsTerm(
             func=base_ang_vel_z_history, 
             params={'mean_noise': 0,
-                    'std_noise': 0.02}         
+                    'std_noise': 0.00}         
             )
+
 
         target_velocity_history = ObsTerm(
             func=target_velocity_history, 
             params={'mean_noise': 0,
                     'std_noise': 0}         
             )
-
-        target_steering_angle_history = ObsTerm(
-            func=target_steering_angle_history, 
-            params={'mean_noise': 0,
-                    'std_noise': 0}         
-            )
+        
+        
+        if CONFIG['env_config']['STEERING_INCREMENTAL_MODE']:
+            target_steering_angle_history = ObsTerm(
+                func=target_steering_angle_history, 
+                params={'mean_noise': 0,
+                        'std_noise': 0}         
+                )
 
         action_history = ObsTerm(
             func=action_history,
@@ -118,47 +115,9 @@ class F1TenthTimeTrialObsCfg:
             params={'delta_s_idx': DELTA_S_IDX,
                     'n_horizon': N_HORIZON,
                     't_horizon': T_HORIZON,
-                    'position_std_noise': 0.08}
+                    'position_std_noise': 0.0}
         )
 
-        # deviation_error = ObsTerm(
-        #     func=deviation_centerline_horizon,
-        #     params={'delta_s_idx': DELTA_S_IDX,
-        #             'n_horizon': N_HORIZON,
-        #             't_horizon': T_HORIZON}
-        # )      
-        # heading_error = ObsTerm(
-        #     func=heading_error_horizon,
-        #     params={'delta_s_idx': DELTA_S_IDX,
-        #             'n_horizon': N_HORIZON,
-        #             't_horizon': T_HORIZON}
-        # )
-        # d_lat_horizon = ObsTerm(
-        #     func=d_lat_horizon,
-        #     params={'delta_s_idx': DELTA_S_IDX,
-        #             'n_horizon': N_HORIZON,
-        #             't_horizon': T_HORIZON}
-        # )
-        # #only one env gives problem
-        # kappa_radpm_horizon = ObsTerm(
-        #     func=kappa_radpm_horizon,
-        #     params={'delta_s_idx': DELTA_S_IDX,
-        #             'n_horizon': N_HORIZON,
-        #             't_horizon': T_HORIZON}
-        # )
-
-        # opponent_frenet_info = ObsTerm(
-        #     func=opponent_frenet_info
-        # )
-        
-        # gap_overtake_info = ObsTerm(
-        #     func=gap_overtake_info
-        # )
-        # delta_psi_rad_horizon = ObsTerm(
-        #     func=delta_psi_rad_horizon,
-        #     params={'delta_s_idx': delta_s_idx,
-        #             'n_horizon': N_STEP_LOOKAHEAD}
-        # )
 
         def __post_init__(self) -> None:
             self.enable_corruption = False
@@ -212,7 +171,7 @@ class F1TenthTimeTrialTerrainImporterCfg(TerrainImporterCfg):
     usd_path = None  # Will be set in post_init
     collision_group = -1
     physics_material = sim_utils.RigidBodyMaterialCfg(
-        friction_combine_mode="multiply",
+        friction_combine_mode="average",
         restitution_combine_mode="max",
         static_friction=STATIC_FRICTION,
         dynamic_friction=DYNAMIC_FRICTION,
@@ -438,11 +397,6 @@ class F1TenthTimeTrialRewardsCfg:
     # """Reward terms for the MDP."""
     # Set "weight" to 0 to deactivate a reward term
 
-    # Penalty if the car goes off-track (it would be crashing on the walls), weight=1
-    # out_of_track = RewTerm(
-    #     func=out_of_track_penalty,
-    #     weight=1,
-    # )
 
     # Standard reward for progressing along centerline, weight=1
     progress_rew = RewTerm(
@@ -450,14 +404,14 @@ class F1TenthTimeTrialRewardsCfg:
         weight=1.0,
     )
 
-    average_vel = RewTerm(
-        func=average_vel,
-        weight=0.008,
-    )
+    # average_vel = RewTerm(
+    #     func=average_vel,
+    #     weight=0.000,
+    # )
         
     wall_collision_penalty = RewTerm(
         func=wall_collision_penalty,
-        weight=2,
+        weight=1,
     )
 
     # soft_wall_collision_penalty = RewTerm(
@@ -472,22 +426,22 @@ class F1TenthTimeTrialRewardsCfg:
 
     var_steering_penalty =  RewTerm(
         func=var_steering_penalty,
-        weight=0.05,
-    )
-
-    effort_throttle_penalty =  RewTerm(
-        func=effort_throttle_penalty,
         weight=0.001,
     )
+
+    # effort_throttle_penalty =  RewTerm(
+    #     func=effort_throttle_penalty,
+    #     weight=0.0,
+    # )
     
     effort_steering_penalty =  RewTerm(
         func=effort_steering_penalty,
-        weight=0.05,
+        weight=0.01,
     )
 
     effort_abs_steering_penalty =  RewTerm(
         func=effort_target_steering_angle_penalty,
-        weight=0.001,
+        weight=0.1,
     )
     # delta_steering_l2_penalty =  RewTerm(
     #     func=delta_steering_l2_penalty,
@@ -568,35 +522,35 @@ class TimeTrialCurriculumCfg:
         params={
             "reward_term_name": "var_steering_penalty",
             "weight_increase": 0.1,
-            "max_weight": 2,
-            "first_episode_increase": 250,
-            "episodes_per_increase": 250,
+            "max_weight": 1,
+            "first_episode_increase": 25,
+            "episodes_per_increase": 25,
             "max_num_increases": 0,
         }
     )
 
-    var_steering_penalty = CurrTerm(
-        func=increase_reward_weight_over_time_every_n_steps,
-        params={
-            "reward_term_name": "var_steering_penalty",
-            "weight_increase": 0.01,
-            "max_weight": 2,
-            "start_increase_after_n_steps" : 500,
-            "steps_per_increase" : 250,
-            "max_num_increases": 0,
-        }
-    )
+    # var_steering_penalty = CurrTerm(
+    #     func=increase_reward_weight_over_time_every_n_steps,
+    #     params={
+    #         "reward_term_name": "var_steering_penalty",
+    #         "weight_increase": 0.01,
+    #         "max_weight": 2,
+    #         "start_increase_after_n_steps" : 500,
+    #         "steps_per_increase" : 250,
+    #         "max_num_increases": 0,
+    #     }
+    # )
     
 
-    effort_steering_penalty = CurrTerm(
+    effort_abs_steering_penalty = CurrTerm(
         func=increase_reward_weight_over_time,
         params={
-            "reward_term_name": "effort_steering_penalty",
-            "weight_increase": 0.25,
-            "max_weight": 1,
-            "first_episode_increase": 500,
-            "episodes_per_increase": 500,
-            "max_num_increases": 0,
+            "reward_term_name": "effort_abs_steering_penalty",
+            "weight_increase": 0.01,
+            "max_weight": 0.1,
+            "first_episode_increase": 25,
+            "episodes_per_increase": 25,
+            "max_num_increases": 0
         }
     )
         
@@ -701,7 +655,7 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
         # self.sim.dt = 0.025/2
         # self.decimation = 2
         # self.sim.render_interval = self.decimation
-        self.sim.render_interval = 2
+        self.sim.render_interval = 10
 
         # Terminations config
         self.episode_length_s = CONFIG['env_config']['EPISODE_LENGTH_S_TIMETRIAL']

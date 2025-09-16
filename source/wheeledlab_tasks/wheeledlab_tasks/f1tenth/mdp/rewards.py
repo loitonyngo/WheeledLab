@@ -649,7 +649,9 @@ def progress_rew(env):
             dtype=torch.long,
             device=env.device
         )
-    no_off_track = env._wall_collision_history.max(dim=1).values == 0
+    # no_off_track = env._wall_collision_history.max(dim=1).values == 0
+    no_off_track = env._wall_collision_history[:, 0] == 0
+
     if not hasattr(env, '_opponent_collision_history'):
         env._rew_history_length = CONFIG['env_config']['REW_HISTORY_LENGTH']
         env._opponent_collision_history = torch.zeros(
@@ -786,6 +788,7 @@ def progress_waypoint_bool(env):
     env.extras['vel_y'] = -asset.data.root_lin_vel_b[:,1]
     env.extras['target_velocity'] = env._target_velocity_history[:, 0].clone()
     env.extras['target_steering'] = env._target_steering_angle_history[:, 0].clone()
+    # env.extras['acc'] = env._base_lin_acc_x_history[:, 0].clone()
 
     env.extras['yaw_rate'] = asset.data.root_ang_vel_b[:,2]
     env.extras['s_idx'] = current_idx.clone()
@@ -797,6 +800,7 @@ def progress_waypoint_bool(env):
     env.extras['vel_y_calc'] = env._vel_y_calc
 
     env.extras['log']['Info/mean_speed'] = torch.mean(env._base_lin_vel_x_history)
+    env.extras['log']['Info/max_speed'] = torch.max(env._base_lin_vel_x_history)
 
     return progress_bool, progress
 
@@ -905,7 +909,7 @@ def effort_target_steering_angle_penalty(env: ManagerBasedEnv, asset_cfg: SceneE
     last_action = mdp.last_action(env)[..., 1]*CONFIG['env_config']['MAX_STEERING_ANGLE_INCREMENT']
     # # shift the history to the right and insert the last angular velocity at the beginning
     env._target_steering_angle_history[:, 1:] = env._target_steering_angle_history[:, :-1].clone()
-    env._target_steering_angle_history[:, 0] = torch.clamp(env._target_steering_angle_history[:, 0] + last_action, min = -0.4, max=0.4)
+    env._target_steering_angle_history[:, 0] = torch.clamp(env._target_steering_angle_history[:, 0] + last_action, min = -0.45, max=0.45)
     effort_steering_penalty = -(env._target_steering_angle_history[:, 0])**2
 
     return effort_steering_penalty

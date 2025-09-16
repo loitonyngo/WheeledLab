@@ -34,7 +34,7 @@ def base_ang_vel_z(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntity
     """Root angular velocity in the asset's root frame. Only z, yaw rade"""
     # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
-    noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
+#     noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
 
     return asset.data.root_ang_vel_b[:,2].unsqueeze(-1) + noise
 
@@ -42,7 +42,7 @@ def base_lin_vel_x_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sce
     """Root linear velocity in the asset's root frame. 2D, only x and y"""
     # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
-    noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
+#     noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
     if not hasattr(env, '_base_lin_vel_x_history'):
         env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
         env._base_lin_vel_x_history = torch.zeros(
@@ -54,14 +54,13 @@ def base_lin_vel_x_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sce
     env._base_lin_vel_x_history[:, 1:] = env._base_lin_vel_x_history[:, :-1].clone()
     env._base_lin_vel_x_history[:, 0] = asset.data.root_lin_vel_b[:,0]
     base_lin_vel_x_history = env._base_lin_vel_x_history
-    norm = 8.0
-    return base_lin_vel_x_history/norm
+    return base_lin_vel_x_history
 
 def base_lin_vel_y_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
     """Root linear velocity in the asset's root frame. 2D, only x and y"""
     # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
-    noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
+#     noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
     if not hasattr(env, '_base_lin_vel_y_history'):
         env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
         env._base_lin_vel_y_history = torch.zeros(
@@ -79,7 +78,7 @@ def base_ang_vel_z_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sce
     """Root angular velocity in the asset's root frame. Only z, yaw rade"""
     # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
-    noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
+#     noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
     if not hasattr(env, '_base_ang_vel_z_history'):
         env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
         env._base_ang_vel_z_history = torch.zeros(
@@ -91,14 +90,14 @@ def base_ang_vel_z_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sce
     env._base_ang_vel_z_history[:, 1:] = env._base_ang_vel_z_history[:, :-1].clone()
     env._base_ang_vel_z_history[:, 0] = asset.data.root_ang_vel_b[:,2]
     base_ang_vel_z_history = env._base_ang_vel_z_history
-    norm = 2.0
-    return base_ang_vel_z_history/norm
+
+    return base_ang_vel_z_history
 
 def base_lin_acc_x_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
     """Root linear acceleration in the asset's root frame. 2D, only x and y"""
     # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
-    noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
+#     noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
     if not hasattr(env, '_base_lin_acc_x_history'):
         env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
         env._base_lin_acc_x_history = torch.zeros(
@@ -106,16 +105,31 @@ def base_lin_acc_x_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sce
             dtype=torch.float32,
             device=env.device
             )
-    # shift the history to the right and insert the last angular velocity at the beginning
+    # --- compute raw acceleration from velocity history ---
+    raw_acc = (
+        env._base_lin_vel_x_history[:, 0] - env._base_lin_vel_x_history[:, 1]
+    ) / env.step_dt
+
+    # --- optional noise ---
+    if std_noise > 0:
+        noise = torch.empty_like(raw_acc).normal_(mean=mean_noise, std=std_noise)
+        raw_acc = raw_acc + noise
+
+    # --- exponential smoothing applied directly in the history ---
+    # shift the history
     env._base_lin_acc_x_history[:, 1:] = env._base_lin_acc_x_history[:, :-1].clone()
-    env._base_lin_acc_x_history[:, 0]  = (env._base_lin_vel_x_history[:, 0] - env._base_lin_vel_x_history[:, 1])/(env.step_dt)
-    norm = 3.0
-    return env._base_lin_acc_x_history/norm
+    # smooth with previous stored value
+    env._base_lin_acc_x_history[:, 0] = (
+        0.5 * raw_acc + (1 - 0.5) * env._base_lin_acc_x_history[:, 1]
+    )
+
+    # --- normalize ---
+    return env._base_lin_acc_x_history / norm
 
 def target_velocity_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
     # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
-    noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
+#     noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
     if not hasattr(env, '_target_velocity_history'):
         env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
         env._target_velocity_history = torch.zeros(
@@ -132,13 +146,12 @@ def target_velocity_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sc
     # # shift the history to the right and insert the last angular velocity at the beginning
     env._target_velocity_history[:, 1:] = env._target_velocity_history[:, :-1].clone()
     env._target_velocity_history[:, 0] = torch.clamp(env._target_velocity_history[:, 0] + last_action, min = 0.0)
-    norm = 8.0
-    return env._target_velocity_history/norm
+    return env._target_velocity_history
 
 def target_steering_angle_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
     # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
-    noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
+#     noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
     if not hasattr(env, '_target_steering_angle_history'):
         env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
         env._target_steering_angle_history = torch.zeros(
@@ -149,16 +162,15 @@ def target_steering_angle_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCf
     last_action = mdp.last_action(env)[..., 1]*CONFIG['env_config']['MAX_STEERING_ANGLE_INCREMENT']
     # # shift the history to the right and insert the last angular velocity at the beginning
     env._target_steering_angle_history[:, 1:] = env._target_steering_angle_history[:, :-1].clone()
-    env._target_steering_angle_history[:, 0] = torch.clamp(env._target_steering_angle_history[:, 0] + last_action, min = -0.4, max=0.4)
-    norm = 0.4
-    return env._target_steering_angle_history/norm
+    env._target_steering_angle_history[:, 0] = torch.clamp(env._target_steering_angle_history[:, 0] + last_action, min = -CONFIG['env_config']['MAX_STEERING_SCALING'], max=CONFIG['env_config']['MAX_STEERING_SCALING'])
+    return env._target_steering_angle_history
 
 #last action is from -1 and 1, not clipped
 def action_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
     """Root angular velocity in the asset's root frame. Only z, yaw rade"""
     # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
-    noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
+#     noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
     if not hasattr(env, '_action_history'):
         env._action_history_length = CONFIG['env_config']['ACTION_HISTORY_LENGTH']
         env._action_history = torch.zeros(
