@@ -30,9 +30,9 @@ parser = argparse.ArgumentParser(description="Play a policy in WheeledLab.")
 ###### DEFINE POLICY TO PLAY ######
 ###################################
 DEFAULT_LOGS_PATH = "/home/tongo/WheeledLab/source/wheeledlab_rl/logs/"
-POLICY = "TR2_TT_20hz_act01_02_fric065_del70_buffer1" 
+POLICY = "TR2_TT_20z_vel01_steer010_fric80_buff10_del50_20_wrad575_nhor40ds5" 
 SAVE_NAME = 'test'
-SAVE_DIR = '/home/tongo/WheeledLab/source/wheeledlab_rl/logs_play_policy'
+SAVE_DIR = '/home/tongo/WheeledLab/source/wheeledlab_rl/output_play_policy'
 TIMESTAMP = datetime.now().strftime("%m%d_%H%M")
 
 ###################################
@@ -465,69 +465,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     plt.legend()
     plt.grid()
     plt.show()
-    # plt.figure(figsize=(15, 10))
 
-    # # Create subplots (2 rows, 1 column)
-    # ax1 = plt.subplot(2, 1, 1)  # Velocity plot
-    # ax2 = plt.subplot(2, 1, 2)  # Slip ratio plot
-
-    # # Calculate metrics
-    # wheel_ang_vel_mean = np.mean(observations[:, 0, 5:9], axis=1)
-    # wheel_lin_vel_mean = np.mean(observations[:, 0, 9:13], axis=1)
-    # slip_ratio = (wheel_ang_vel_mean*0.06/wheel_lin_vel_mean-1)
-
-    # # Plot 1: Velocities
-    # for env_idx in range(actions.shape[1]):
-    #     # Angular velocities (converted to linear by multiplying with radius)
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 5]*0.06, '--', color='red', alpha=0.5, label='BL ang_vel×r' if env_idx==0 else "")
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 6]*0.06, '--', color='orange', alpha=0.5, label='BR ang_vel×r' if env_idx==0 else "")
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 7]*0.06, '--', color='blue', alpha=0.5, label='FL ang_vel×r' if env_idx==0 else "")
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 8]*0.06, '--', color='cyan', alpha=0.5, label='FR ang_vel×r' if env_idx==0 else "")
-        
-    #     # Linear velocities
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 9], color='red', alpha=0.5, label='BL lin_vel' if env_idx==0 else "")
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 10], color='orange', alpha=0.5, label='BR lin_vel' if env_idx==0 else "")
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 11], color='blue', alpha=0.5, label='FL lin_vel' if env_idx==0 else "")
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 12], color='cyan', alpha=0.5, label='FR lin_vel' if env_idx==0 else "")
-
-    # # Plot mean values
-
-    # ax1.plot(time[start_idx:end_idx], wheel_ang_vel_mean[start_idx:end_idx]*0.06, '--', color='black', label='Mean ang_vel×r')
-    # ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 13]*0.06, '--', color='red', marker='x', label='Mean ang_speed×r')
-
-    # ax1.plot(time[start_idx:end_idx], wheel_lin_vel_mean[start_idx:end_idx], color='blue', marker='x', label='Mean lin_vel')
-    # ax1.plot(time[start_idx:end_idx], vel[start_idx:end_idx], color='purple', label='Base speed')
-
-    # ax1.set_ylabel('Velocity (m/s)')
-    # ax1.set_title('Wheel Velocities')
-    # ax1.legend()
-    # ax1.grid(True)
-
-    # # Plot 2: Slip Ratio
-    # for env_idx in range(actions.shape[1]):
-    #     # Individual wheel slip ratios
-    #     wheel_slip_BL = (observations[start_idx:end_idx, env_idx, 5]*0.06/observations[start_idx:end_idx, env_idx, 9])-1
-    #     wheel_slip_BR = (observations[start_idx:end_idx, env_idx, 6]*0.06/observations[start_idx:end_idx, env_idx, 10])-1
-    #     wheel_slip_FL = (observations[start_idx:end_idx, env_idx, 7]*0.06/observations[start_idx:end_idx, env_idx, 11])-1
-    #     wheel_slip_FR = (observations[start_idx:end_idx, env_idx, 8]*0.06/observations[start_idx:end_idx, env_idx, 12])-1
-        
-    #     ax2.plot(time[start_idx:end_idx], wheel_slip_BL, color='red', alpha=0.5, label='BL slip' if env_idx==0 else "")
-    #     ax2.plot(time[start_idx:end_idx], wheel_slip_BR, color='orange', alpha=0.5, label='BR slip' if env_idx==0 else "")
-    #     ax2.plot(time[start_idx:end_idx], wheel_slip_FL, color='blue', alpha=0.5, label='FL slip' if env_idx==0 else "")
-    #     ax2.plot(time[start_idx:end_idx], wheel_slip_FR, color='cyan', alpha=0.5, label='FR slip' if env_idx==0 else "")
-
-    # # Mean slip ratio
-    # ax2.plot(time[start_idx:end_idx], slip_ratio[start_idx:end_idx], color='black', label='Mean slip ratio')
-    # ax2.axhline(0, color='gray', linestyle='--')  # Reference line at zero slip
-
-    # ax2.set_xlabel('Time (s)')
-    # ax2.set_ylabel('Slip Ratio')
-    # ax2.set_title('Wheel Slip Ratios')
-    # ax2.legend()
-    # ax2.grid(True)
-
-    # plt.tight_layout()
-    # plt.show()
 
 def resample_time_series(original_time, original_values, new_time):
     """

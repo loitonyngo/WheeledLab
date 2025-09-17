@@ -159,10 +159,12 @@ def target_steering_angle_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCf
             dtype=torch.float32,
             device=env.device
             )    
-    last_action = mdp.last_action(env)[..., 1]*CONFIG['env_config']['MAX_STEERING_ANGLE_INCREMENT']
-    # # shift the history to the right and insert the last angular velocity at the beginning
-    env._target_steering_angle_history[:, 1:] = env._target_steering_angle_history[:, :-1].clone()
-    env._target_steering_angle_history[:, 0] = torch.clamp(env._target_steering_angle_history[:, 0] + last_action, min = -CONFIG['env_config']['MAX_STEERING_SCALING'], max=CONFIG['env_config']['MAX_STEERING_SCALING'])
+    if CONFIG['env_config']['STEERING_INCREMENTAL_MODE']:
+        last_action = mdp.last_action(env)[..., 1]*CONFIG['env_config']['MAX_STEERING_ANGLE_INCREMENT']
+        # # shift the history to the right and insert the last angular velocity at the beginning
+        env._target_steering_angle_history[:, 1:] = env._target_steering_angle_history[:, :-1].clone()
+        env._target_steering_angle_history[:, 0] = torch.clamp(env._target_steering_angle_history[:, 0] + last_action, min = -CONFIG['env_config']['MAX_STEERING_SCALING'], max=CONFIG['env_config']['MAX_STEERING_SCALING'])
+
     return env._target_steering_angle_history
 
 #last action is from -1 and 1, not clipped

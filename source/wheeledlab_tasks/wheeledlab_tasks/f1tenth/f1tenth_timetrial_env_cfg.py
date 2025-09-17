@@ -99,12 +99,11 @@ class F1TenthTimeTrialObsCfg:
             )
         
         
-        if CONFIG['env_config']['STEERING_INCREMENTAL_MODE']:
-            target_steering_angle_history = ObsTerm(
-                func=target_steering_angle_history, 
-                params={'mean_noise': 0,
-                        'std_noise': 0}         
-                )
+        target_steering_angle_history = ObsTerm(
+            func=target_steering_angle_history, 
+            params={'mean_noise': 0,
+                    'std_noise': 0}         
+            )
 
         action_history = ObsTerm(
             func=action_history,
@@ -122,6 +121,8 @@ class F1TenthTimeTrialObsCfg:
         def __post_init__(self) -> None:
             self.enable_corruption = False
             self.concatenate_terms = True
+
+
 
 
     policy: PolicyCfg = PolicyCfg()
@@ -436,12 +437,12 @@ class F1TenthTimeTrialRewardsCfg:
     
     effort_steering_penalty =  RewTerm(
         func=effort_steering_penalty,
-        weight=0.01,
+        weight=0.02,
     )
 
     effort_abs_steering_penalty =  RewTerm(
         func=effort_target_steering_angle_penalty,
-        weight=0.1,
+        weight=0.2,
     )
     # delta_steering_l2_penalty =  RewTerm(
     #     func=delta_steering_l2_penalty,

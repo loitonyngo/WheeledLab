@@ -313,17 +313,12 @@ class AckermannIncrementalAction(ActionTerm):
         # store the raw actions
         self._raw_actions[:] = actions
 
-        if self._bounding_strategy == 'clip':
-            if CONFIG['env_config']['STEERING_INCREMENTAL_MODE']:
-                self._processed_actions = torch.clip(actions, min=-1.0, max=1.0) * torch.tensor([CONFIG['env_config']['MAX_SPEED_INCREMENT'], CONFIG['env_config']['MAX_STEERING_ANGLE_INCREMENT']], device=self.device) + self._offset
-            else:
-                self._processed_actions = torch.clip(actions, min=-1.0, max=1.0) * torch.tensor([CONFIG['env_config']['MAX_SPEED_INCREMENT'], CONFIG['env_config']['MAX_STEERING_SCALING']], device=self.device) + self._offset
-
-        elif self._bounding_strategy == 'tanh':
-            self._processed_actions = torch.tanh(actions) * self._scale + self._offset
-
+        if CONFIG['env_config']['STEERING_INCREMENTAL_MODE']:
+            self._processed_actions = torch.clip(actions, min=-1.0, max=1.0) * torch.tensor([CONFIG['env_config']['MAX_SPEED_INCREMENT'], CONFIG['env_config']['MAX_STEERING_ANGLE_INCREMENT']], device=self.device) 
         else:
-            self._processed_actions = actions * self._scale + self._offset
+            self._processed_actions = torch.clip(actions, min=-1.0, max=1.0) * torch.tensor([CONFIG['env_config']['MAX_SPEED_INCREMENT'], CONFIG['env_config']['MAX_STEERING_SCALING']], device=self.device) 
+
+
 
 
     def apply_actions(self):
@@ -332,9 +327,9 @@ class AckermannIncrementalAction(ActionTerm):
         self._target_velocity = torch.clamp(self._env._target_velocity_history[:, 0] + self.processed_actions[:, 0], min=0.5)
         
         if CONFIG['env_config']['STEERING_INCREMENTAL_MODE']:
-            self._target_steering_angle = torch.clamp(self._env._target_steering_angle_history[:, 0] + self.processed_actions[:, 1], min=-CONFIG['env_config']['MAX_STEERING_SCALING'], max=CONFIG['env_config']['MAX_STEERING_SCALING'])
+            self._target_steering_angle = torch.clamp(self._env._target_steering_angle_history[:, 0] + self.processed_actions[:, 1] + CONFIG['env_config']['STEERING_OFFSET'], min=-CONFIG['env_config']['MAX_STEERING_SCALING'], max=CONFIG['env_config']['MAX_STEERING_SCALING'])
         else:
-            self._target_steering_angle = self.processed_actions[:, 1]
+            self._target_steering_angle = self.processed_actions[:, 1] + CONFIG['env_config']['STEERING_OFFSET']
             
         left_rotator_angle, right_rotator_angle, wheel_speeds = self._calculate_ackermann_angles_and_velocities(
             target_velocity= self._target_velocity/CONFIG['env_config']['SPEED_SIM_TO_REAL_SCALING'], # Velocity for all cars

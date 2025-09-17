@@ -21,26 +21,22 @@ import argparse
 from datetime import datetime
 import pandas as pd
 import os
+import matplotlib.pyplot as plt
+import numpy as np
 
 parser = argparse.ArgumentParser(description="Play a policy in WheeledLab.")
-# These arguments assume that a run folder can be found
-# Add this line to accept the policy name as an argument
-# parser.add_argument("--policy", type=str, default='revived-durian-924', 
-#                    help="Policy name to use (default: revived-durian-924)")
 
-# It would be nice to define policy as args_cli 30 N 3.8 kg
 ###################################
 ###### DEFINE POLICY TO PLAY ######
 ###################################
 DEFAULT_LOGS_PATH = "/home/tongo/WheeledLab/source/wheeledlab_rl/logs/"
-POLICY = 'TR2_TT_20hz_act01_02_fric065_del70_buffer1'
-SAVE_NAME = 'test'
-SAVE_DIR = '/home/tongo/WheeledLab/source/wheeledlab_rl/logs_play_policy'
+POLICY = 'GEN_TT_20z_vel_12_steer15_fric75_nhor20ds10_del3010'
+SAVE_NAME = 'test_1'
+SAVE_DIR = '/home/tongo/WheeledLab/source/wheeledlab_rl/output_compare_sim_real'
 TIMESTAMP = datetime.now().strftime("%m%d_%H%M")
 
 REAL_DATA_DIR = "/home/tongo/WheeledLab/source/wheeledlab_rl/real_data/"
-# REAL_DATA_NAME = "bb_speed_3_angle_3_p_2.csv"
-REAL_DATA_NAME = "0911_sysid_1.csv"
+REAL_DATA_NAME = "CIR1_STMPC_tt.csv"
 
 REAL_DATA_PATH = os.path.join(REAL_DATA_DIR, REAL_DATA_NAME)
 ###################################
@@ -93,6 +89,8 @@ from wheeledlab_rl.utils import ClipAction
 
 import matplotlib.pyplot as plt
 import numpy as np
+
+from scipy.interpolate import interp1d
 
 # Resolve paths
 FROM_RUN = args_cli.run_path is not None
@@ -179,18 +177,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
         'theta': [],
         's_idx': [],
         'time': [],
-        's_idx_max': [],
-        'inner_bounds': [],
-        'outer_bounds': [],
-        'throttle_joints_applied_effort': [],
-        'vel_y_calc': []  
+        's_idx_max': []
     }
 
     ### PLAY POLICY ###
 
     # reset environment
     obs, _ = env.get_observations()
-
         
     real_data = pd.read_csv(REAL_DATA_PATH)
 
@@ -200,11 +193,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
         time_data = torch.zeros(args_cli.steps+1, device=env.unwrapped.device)
         cmd_steering[:len(real_data["cmd_steering_angle"])] = torch.tensor(real_data["cmd_steering_angle"].values)
         cmd_velocity[:len(real_data["cmd_velocity"])] = torch.tensor(real_data["cmd_velocity"].values)
-        time_data[:len(real_data["Time"])] = torch.tensor(real_data["Time"].values)
+        time_data[:len(real_data["time"])] = torch.tensor(real_data["time"].values)
     else:
         cmd_steering = torch.tensor(real_data["cmd_steering_angle"].values)
         cmd_velocity = torch.tensor(real_data["cmd_velocity"].values)
-        time_data = torch.tensor(real_data["Time"].values)
+        time_data = torch.tensor(real_data["time"].values)
 
     # Create new time points at fixed interval dt
     dt = env.cfg.sim.dt*env.cfg.decimation  # your desired time interval
@@ -214,61 +207,33 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     cmd_steering_resampled = resample_time_series(time_data, cmd_steering, new_time)
     cmd_velocity_resampled = resample_time_series(time_data, cmd_velocity, new_time)
 
-    # plt.plot(new_time, cmd_steering_resampled, label='Resampled Steering')
-    # plt.plot(new_time, cmd_velocity_resampled, label='Resampled Velocity')
-    # plt.show()
-
     # simulate environment
     for time_idx in tqdm(range(args_cli.steps), desc="Playing policy"):
         # run everything in inference mode
         with torch.inference_mode():
             actions = policy(obs)
-
-            MAX_SPEED = 8
-            MAX_ANGLE = 0.40
-            CMD_TO_REAL_MULTIPLIER_SPEED = 1 # This is the multiplier to convert command speed to real speed
-            CMD_TO_REAL_MULTIPLIER_ANGLE = 1  # This is the multiplier to convert command angle to real angle
-            actions[:,0] = cmd_velocity_resampled[time_idx+1]/CONFIG['env_config']['MAX_SPEED_SCALING']/CMD_TO_REAL_MULTIPLIER_SPEED
-            actions[:,1] = cmd_steering_resampled[time_idx+1]/CONFIG['env_config']['MAX_STEERING_SCALING']/CMD_TO_REAL_MULTIPLIER_SPEED
+            actions[:,0] = cmd_velocity_resampled[time_idx+1]/CONFIG['env_config']['MAX_SPEED_SCALING']
+            actions[:,1] = cmd_steering_resampled[time_idx+1]/CONFIG['env_config']['MAX_STEERING_SCALING']
             # env stepping
             obs, rew, _, extras = env.step(actions)
+            
         # save data
         data['observations'].append(obs)
         data['rewards'].append(rew)
         data['actions'].append(actions)
-        try:
-            data['theta'].append(extras['theta'])
-        except:
-            print('WARNING: could not store data')
-        try:
-            data['pos_xy'].append(extras['pos_xy'])
-        except:
-            print('WARNING: could not store data')
-        try:
-            data['vel_x'].append(extras['vel_x'])
-            data['vel_y'].append(extras['vel_y'])
-            data['vel_y_calc'].append(extras['vel_y_calc'])
-            data['yaw_rate'].append(extras['yaw_rate'])
-        except:
-            print('WARNING: could not store data')
-        try:
-            data['throttle_joints_applied_effort'].append(extras['throttle_joints_applied_effort'])
-        except:
-            print('WARNING: could not store data')
-        try:
-            data['s_idx'].append(extras['s_idx'])
-            data['s_idx_max'].append(extras['s_idx_max'])
-        except:
-            print('WARNING: could not store data')            
-        try:
-            data['time'].append(extras['time'])
-        except:
-            print('WARNING: could not store data')
-        try:
-           data['inner_bounds'].append(extras['inner'])
-           data['outer_bounds'].append(extras['outer'])
-        except:
-            print('WARNING: could not store data')
+        
+        fields = [
+            'pos_xy', 'theta',
+            'vel_x', 'vel_y', 'yaw_rate',
+            's_idx', 's_idx_max',
+            'time',
+        ]
+        for field in fields:
+            value = extras.get(field)
+            if value is not None:
+                data[field].append(value)
+            else:
+                print(f'WARNING: could not store {field}')
     ###
 
 
@@ -277,28 +242,73 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     ########################
 
     if args_cli.save_data:
-        for key in data.keys():
-            try:
-                data[key] = torch.stack(data[key], dim=0)
-            except:
-                print('WARNING: could not torch.stack')
-                continue
-        
+        # Create a dedicated folder for this episode’s data
+        save_folder = os.path.join(SAVE_DIR, SAVE_NAME)
+        os.makedirs(save_folder, exist_ok=True)  # creates folder if it doesn't exist
+
         # Base filename without extension
-        base_name = os.path.join(SAVE_DIR, f"{args_cli.save_name}")
+        base_name = os.path.join(save_folder, f"{args_cli.save_name}")
         
         # Check if file exists and find appropriate suffix
         suffix = ""
         counter = 0
         while True:
-            save_path = f"{base_name}{suffix}.pt"
-            if not os.path.exists(save_path):
+            save_pt_path = f"{base_name}{suffix}.pt"
+            save_csv_path = f"{base_name}{suffix}.csv"
+            if not os.path.exists(save_pt_path) and not os.path.exists(save_csv_path):
                 break
             suffix = f"_{counter}"
             counter += 1
-        
-        torch.save(data, save_path)
-        print(f"[INFO] Saved episode data to: {save_path}")
+
+        # --- Save as .pt ---
+        for key in data.keys():
+            try:
+                data[key] = torch.stack(data[key], dim=0)
+            except Exception as e:
+                print(f'WARNING: could not torch.stack {key} ({e})')
+                continue
+
+        torch.save(data, save_pt_path)
+        print(f"[INFO] Saved episode data to: {save_pt_path}")
+
+        # --- Save selected fields as .csv ---
+        selected_fields = ["actions", "pos_xy", "theta", "vel_x", "vel_y", "yaw_rate", "s_idx", "time"]
+
+        df_dict = {}
+        lengths = []
+
+        for key in selected_fields:
+            if key not in data:
+                print(f"WARNING: {key} not found in data")
+                continue
+
+            tensor = data[key].cpu().squeeze()  # remove singleton dimensions
+
+            if key == "pos_xy":
+                df_dict["x"] = tensor[:, 0].numpy().astype(float)
+                df_dict["y"] = tensor[:, 1].numpy().astype(float)
+                lengths.append(tensor.shape[0])
+            elif key == "actions":
+                df_dict["speed_cmd"] = tensor[:, 0].numpy().astype(float)
+                df_dict["steering_cmd"] = tensor[:, 1].numpy().astype(float)
+            else:
+                arr = tensor.numpy().astype(float)
+                df_dict[key] = arr
+                lengths.append(arr.shape[0])
+
+        # Align all arrays to the same length
+        min_len = min(lengths)
+        for k in df_dict:
+            df_dict[k] = df_dict[k][:min_len]
+
+        # Column order and renaming
+        col_order = ["time", "x", "y", "speed_cmd", "steering_cmd", "theta", "vel_x", "vel_y", "yaw_rate", "s_idx"]
+        df = pd.DataFrame(df_dict)[col_order]
+        df.columns = ["time", "x", "y", "speed_cmd", "steering_cmd", "theta_rad", "vx_mps", "vy_mps", "psi_radps", "s_idx"]
+
+        df.to_csv(save_csv_path, index=False)
+        print(f"[INFO] Saved selected episode data to: {save_csv_path}")
+
 
     print("Done playing policy. Closing environment.")
     env.close()
@@ -308,253 +318,234 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
 ##############################################################
 
 
-    # Load the saved data
-    data_path = save_path
-    data = torch.load(data_path)
+    # --------------------------
+    # Load the saved CSV data
+    # --------------------------
+    sim_data = pd.read_csv(save_csv_path)
 
-    # Load real data to compare
+    # Load real data
     real_data = pd.read_csv(REAL_DATA_PATH)
-    # real_data = real_data.loc[real_data['cmd_velocity']>0]  # Ensure same length
-    real_data['Time'] = real_data['Time'] - real_data['Time'].iloc[0]   # Limit to the same number of steps
+    real_data['time'] -= real_data['time'].iloc[0]  # normalize start at 0
 
-    # Convert to numpy for plotting (if needed)
-    actions = data['actions'].cpu().numpy()           # Shape: [timesteps, num_envs, action_dim]
-    observations = data['observations'].cpu().numpy()  # Shape: [timesteps, num_envs, obs_dim]
-    time = data['time'].cpu().numpy()  
-    
-    s_idx = torch.squeeze(data['s_idx']).cpu().numpy()  
-    theta = torch.squeeze(data['theta']).cpu().numpy()
+    # --------------------------
+    # Convert sim CSV columns to numpy arrays
+    # --------------------------
+    actions      = sim_data.filter(like="actions").to_numpy()       # e.g., actions_0, actions_1...
+    pos_xy       = sim_data[['x', 'y']].to_numpy()
+    vel_x        = sim_data['vx_mps'].to_numpy()
+    vel_y        = sim_data['vy_mps'].to_numpy()
+    yaw_rate     = sim_data['psi_radps'].to_numpy()
+    s_idx        = sim_data['s_idx'].to_numpy()
+    theta        = sim_data['theta_rad'].to_numpy()
+    time         = sim_data['time'].to_numpy()
+    speed_cmd    = sim_data['speed_cmd'].to_numpy()
+    steering_cmd = sim_data['steering_cmd'].to_numpy()
 
-    reset_idx = np.where(np.diff(s_idx)<(-np.max(s_idx)+10))
-    # start_idx = reset_idx[0][0] 
-    # end_idx = reset_idx[0][1] 
-    start_idx = 0 
-    end_idx = 1000
-
-    pos_xy = torch.squeeze(data['pos_xy']).cpu().numpy() 
-    vel_x = torch.squeeze(data['vel_x']).cpu().numpy() 
-    vel_y = torch.squeeze(data['vel_y']).cpu().numpy() 
-    vel_y_calc = torch.squeeze(data['vel_y_calc']).cpu().numpy()
-    yaw_rate = torch.squeeze(data['yaw_rate']).cpu().numpy() 
-    throttle_joints_applied_effort = torch.squeeze(data['throttle_joints_applied_effort']).cpu().numpy() 
-    
-    vel = np.sqrt(np.square(vel_x) + np.square(vel_y))
-    acceleration = np.gradient(vel[start_idx:end_idx], time[start_idx:end_idx])
-    jerk = np.gradient(acceleration[start_idx:end_idx], time[start_idx:end_idx])
-
-    ############ Align with real data length ############
-    # Get the start and end times for both datasets
-    real_start_time = real_data['Time'].iloc[0]
-    real_end_time = real_data['Time'].iloc[-1]
-
-    sim_start_time = time.min()  # Assuming 'time' is a numpy array
-    sim_end_time = time.max()
-
-    # # Find the overlapping time range
-    global_start = max(real_start_time, sim_start_time)
-    global_end = min(real_end_time, sim_end_time)
-
-    # # Trim real_data to the overlapping range
-    real_data = real_data[
-        (real_data['Time'] >= global_start) & 
-        (real_data['Time'] <= global_end)
-    ]
-    real_data['theta'] = real_data['theta'] - real_data['theta'].iloc[0]  # Normalize theta to start from 0
-    
-    # # Trim simulated data (assuming 'time' is a 1D array)
-    sim_mask = (time >= global_start) & (time <= global_end)
-    sim_mask = time <= global_end
-
-    s_idx = s_idx[sim_mask]  # Trim s_idx accordingly
-    theta = theta[sim_mask]  # Trim theta accordingly
-    theta = theta - theta[0]  # Normalize theta to start from 0
-    time = time[sim_mask]
-    observations = observations[sim_mask]  # Trim observations accordingly
-    actions = actions[sim_mask]           # Trim actions accordingly
-    pos_xy = pos_xy[sim_mask]             # Trim pos_xy accordingly
-    pos_xy[:,0] = pos_xy[:,0]-pos_xy[0,0]
-    pos_xy[:,1] = pos_xy[:,1]-pos_xy[0,1]
-
-    # translate to origin
-    pos_xy = pos_xy - pos_xy[0]
-
-    # compute initial heading
-    dx, dy = pos_xy[1] - pos_xy[0]
-    init_angle = np.arctan2(dy, dx)
-
-    # rotation matrix to align heading with x-axis
-    R = np.array([
-        [np.cos(-init_angle), -np.sin(-init_angle)],
-        [np.sin(-init_angle),  np.cos(-init_angle)]
-    ])
-
-    # apply rotation
-    pos_xy = (R @ pos_xy.T).T
-
-    vel = vel[sim_mask]                 # Trim vel accordingly
-    acceleration = acceleration[sim_mask]  # Trim acceleration accordingly
-    jerk = jerk[sim_mask]
-    vel_x = vel_x[sim_mask]
-    vel_y = vel_y[sim_mask]
-    vel_y_calc = vel_y_calc[sim_mask]
-    yaw_rate = yaw_rate[sim_mask]
-
-    from scipy.interpolate import interp1d
-
-    # Step 1: Extract relevant data
-    sim_time = time  # Already trimmed
-    sim_vx = vel_x  # Simulated vx
-    real_data['x'] = real_data['x'].values -real_data['x'].iloc[0]
-    real_data['y'] = real_data['y'].values -real_data['y'].iloc[0]
-    real_time = real_data['Time'].values
-    real_vx = real_data['vx'].values
-    real_x = real_data['x'].values 
-    real_y = real_data['y'].values 
-
-    # Step 2: Interpolate sim vx to real_time points
-    sim_vx_interp_func = interp1d(sim_time, sim_vx, kind='linear', fill_value="extrapolate")
-    x_interp_func = interp1d(sim_time, pos_xy[:,0], axis=0, kind='linear', fill_value="extrapolate")
-    y_interp_func = interp1d(sim_time, pos_xy[:,1], axis=0, kind='linear', fill_value="extrapolate")
-
-    sim_vx_interp = sim_vx_interp_func(real_time)
-    x_interp = x_interp_func(real_time)
-    y_interp = y_interp_func(real_time)
-
-
-    # Step 3: Compute the difference
-    vx_diff = real_vx - sim_vx_interp
-    xy_diff = np.sqrt((real_x - x_interp)**2 + (real_y - y_interp)**2)
-
+    # Optional bounds (if saved)
     try:
-        inner = torch.squeeze(data['inner_bounds']).cpu().numpy() 
-        outer = torch.squeeze(data['outer_bounds']).cpu().numpy() 
-    except:
-        print('WARNING try except')
+        inner = sim_data['inner_bounds'].to_numpy()
+        outer = sim_data['outer_bounds'].to_numpy()
+    except KeyError:
+        print('WARNING: bounds not available in CSV')
+
+    # --------------------------
+    # Compute derived quantities
+    # --------------------------
+    vel = np.sqrt(vel_x**2 + vel_y**2)
+    acceleration = np.gradient(vel, time)
+    jerk = np.gradient(acceleration, time)
+
+
+    # --------------------------
+    # Align sim and real data time window
+    # --------------------------
+    real_start, real_end = real_data['time'].iloc[0], real_data['time'].iloc[-1]
+    sim_start, sim_end   = time.min(), time.max()
+
+    window_start = max(real_start, sim_start)
+    window_end   = min(real_end, sim_end)
+
+    # Masks for slicing
+    sim_mask  = (time >= window_start) & (time <= window_end)
+    real_mask = (real_data['time'] >= window_start) & (real_data['time'] <= window_end)
+
+    # --------------------------
+    # Slice simulation data
+    # --------------------------
+    sim_time       = time[sim_mask]
+    sim_pos_xy     = pos_xy[sim_mask]
+    sim_vel_x      = vel_x[sim_mask]
+    sim_vel_y      = vel_y[sim_mask]
+    sim_theta      = theta[sim_mask]
+    sim_speed_cmd  = speed_cmd[sim_mask]
+    sim_steering   = steering_cmd[sim_mask]
+    sim_yaw_rate   = yaw_rate[sim_mask]
+    sim_s_idx      = s_idx[sim_mask]
+
+    # --------------------------
+    # Slice real data
+    # --------------------------
+    real_time  = real_data['time'].values[real_mask]
+    real_x     = real_data['x'].values[real_mask]
+    real_y     = real_data['y'].values[real_mask]
+    real_vx    = real_data['vx'].values[real_mask]
+    real_vy    = real_data['vy'].values[real_mask]
+    real_theta = real_data['theta'].values[real_mask]
+
+
+    # --------------------------
+    # Shift trajectories to start at (0,0)
+    # --------------------------
+    sim_pos_xy -= sim_pos_xy[0]       # subtract first sim position
+    real_x    -= real_x[0]           # subtract first real x
+    real_y    -= real_y[0]           # subtract first real y
+
+    # --------------------------
+    # Derived quantities
+    # --------------------------
+    vel = np.sqrt(sim_vel_x**2 + sim_vel_y**2)
+    acceleration = np.gradient(vel, sim_time)
+    jerk = np.gradient(acceleration, sim_time)
 
     
-    plt.figure(figsize=(15, 15))  # Adjusted height for 4 subplots
+    # Interpolation functions
+    interp_vel_x  = interp1d(sim_time, sim_vel_x,  kind='linear', fill_value='extrapolate')
+    interp_pos_x  = interp1d(sim_time, sim_pos_xy[:,0], kind='linear', fill_value='extrapolate')
+    interp_pos_y  = interp1d(sim_time, sim_pos_xy[:,1], kind='linear', fill_value='extrapolate')
 
-    # ---------------------------
-    # Subplot 1: Command Velocity and Steering
-    # ---------------------------
-    ax1 = plt.subplot(4, 1, 1)
+    # Apply interpolation to real_time
+    sim_vel_x_interp = interp_vel_x(real_time)
+    sim_pos_x_interp = interp_pos_x(real_time)
+    sim_pos_y_interp = interp_pos_y(real_time)
+
+    # --------------------------
+    # Estimate real initial heading using first few points to reduce noise
+    # --------------------------
+    N_heading_points = 20  # use first 20 points to estimate heading
+    dx_real = real_x[20] - real_x[0]
+    dy_real = real_y[20] - real_y[0]
+    real_init_angle = np.arctan2(dy_real, dx_real)
+
+    # --------------------------
+    # Compute sim initial heading
+    dx_sim = sim_pos_xy[1,0] - sim_pos_xy[0,0]
+    dy_sim = sim_pos_xy[1,1] - sim_pos_xy[0,1]
+    sim_init_angle = np.arctan2(dy_sim, dx_sim)
+
+    # --------------------------
+    # Rotate sim trajectory to match real initial heading
+    # --------------------------
+    angle_diff = real_init_angle - sim_init_angle -np.pi *0.64
+    R = np.array([[np.cos(angle_diff), -np.sin(angle_diff)],
+                [np.sin(angle_diff),  np.cos(angle_diff)]])
+    sim_pos_xy_rotated = (R @ sim_pos_xy.T).T
+
+    # --------------------------
+    # Interpolate sim position to real timestamps
+    # --------------------------
+    interp_pos_x = interp1d(sim_time, sim_pos_xy_rotated[:,0], kind='linear', fill_value='extrapolate')
+    interp_pos_y = interp1d(sim_time, sim_pos_xy_rotated[:,1], kind='linear', fill_value='extrapolate')
+
+    sim_x_interp = interp_pos_x(real_time)
+    sim_y_interp = interp_pos_y(real_time)
+
+
+    # Now you can calculate differences
+    vx_diff = real_vx - sim_vel_x_interp
+    xy_diff = np.sqrt((real_x - sim_pos_x_interp)**2 + (real_y - sim_pos_y_interp)**2)
+
+
+    # --------------------------
+    # Translate and rotate sim pos_xy to origin
+    # --------------------------
+    # sim_pos_xy -= sim_pos_xy[0]
+    # dx, dy = sim_pos_xy[1] - sim_pos_xy[0]
+    # init_angle = np.arctan2(dy, dx)
+    # R = np.array([[np.cos(-init_angle), -np.sin(-init_angle)],
+    #             [np.sin(-init_angle),  np.cos(-init_angle)]])
+    # sim_pos_xy = (R @ sim_pos_xy.T).T
+
+    real_x -= real_x[0]
+    real_y -= real_y[0]
+
+    # --------------------------
+    # Plotting
+    # --------------------------
+    plt.figure(figsize=(15, 15))
+
+    # ---- Subplot 1: Command Velocity and Steering ----
+    ax1 = plt.subplot(4,1,1)
     ax1b = ax1.twinx()
-    # print(real_data['Time'])
-    # Plot velocity on ax1 (left y-axis)
-    ax1.plot(time[start_idx:end_idx], actions[start_idx:end_idx, 0, 0]*CONFIG['env_config']['MAX_SPEED_SCALING'], 
+
+    ax1.plot(sim_time, sim_speed_cmd * CONFIG['env_config']['MAX_SPEED_SCALING'],
             color='green', label='Model cmd velocity')
-    ax1.plot(real_data['Time'], real_data['cmd_velocity'], 
+    ax1.plot(real_time, real_data['cmd_velocity'].values[real_mask],
             color='green', linestyle='--', label='Real cmd velocity')
 
-    # ax1.plot(time[start_idx:end_idx], throttle_joints_applied_effort[start_idx:end_idx, 0], 
-    #         color='red', label='effort')
-    # ax1.plot(time[start_idx:end_idx], throttle_joints_applied_effort[start_idx:end_idx, 1], 
-    #         color='red', label='effort')
-    # ax1.plot(time[start_idx:end_idx], throttle_joints_applied_effort[start_idx:end_idx, 2], 
-    #         color='red', label='effort')
-    # ax1.plot(time[start_idx:end_idx], throttle_joints_applied_effort[start_idx:end_idx, 3], 
-    #         color='red', label='effort')
-    
-    # Plot steering on ax1b (right y-axis)
-    ax1b.plot(time[start_idx:end_idx], actions[start_idx:end_idx, 0, 1]*CONFIG['env_config']['MAX_STEERING_SCALING'], 
+    ax1b.plot(sim_time, sim_steering * CONFIG['env_config']['MAX_STEERING_SCALING'],
             color='blue', label='Model cmd steering')
-    ax1b.plot(real_data['Time'], real_data['cmd_steering_angle'], 
+    ax1b.plot(real_time, real_data['cmd_steering_angle'].values[real_mask],
             color='blue', linestyle='--', label='Real cmd steering')
 
-    # Customize axes
     ax1.set_ylabel('Velocity', color='green')
     ax1b.set_ylabel('Steering Angle', color='blue')
     ax1.tick_params(axis='y', colors='green')
     ax1b.tick_params(axis='y', colors='blue')
 
-    # Combine legends
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines1b, labels1b = ax1b.get_legend_handles_labels()
     ax1.legend(lines1 + lines1b, labels1 + labels1b, loc='upper right')
     ax1.set_title(f"{POLICY}: Command Velocity and Steering")
     ax1.grid(True)
 
-    # ---------------------------
-    # Subplot 2: Linear Velocity and Acceleration
-    # ---------------------------
-    ax2 = plt.subplot(4, 1, 2, sharex=ax1)
-    ax2b = ax2.twinx()  # For acceleration
-    ax2c = ax2.twinx()  # For jerk
+    # ---- Subplot 2: Linear Velocity, Acceleration, Jerk ----
+    ax2 = plt.subplot(4,1,2, sharex=ax1)
+    ax2b = ax2.twinx()
+    ax2c = ax2.twinx()
+    ax2c.spines['right'].set_position(('outward', 60))
 
-    # Plot linear velocities on ax2 (left y-axis)
-    ax2.plot(time[start_idx:end_idx], vel_x[start_idx:end_idx], 
-            color='g', label='Lin Vel X (sim)')
-    ax2.plot(real_data['Time'], real_data['vx'], 
-            label='Vel X (real)', color='g', linestyle='--')
+    ax2.plot(sim_time, sim_vel_x, color='g', label='Lin Vel X (sim)')
+    ax2.plot(real_time, real_vx, color='g', linestyle='--', label='Lin Vel X (real)')
 
-    ax2.plot(time[start_idx:end_idx], -vel_y[start_idx:end_idx], 
-            color='b', label='Lin Vel Y (sim)')
-    ax2.plot(time[start_idx:end_idx], vel_y_calc[start_idx:end_idx], 
-            color='cyan', label='Lin Vel Y (calculated)')
-    
-    ax2.plot(real_data['Time'], real_data['vy'], 
-            label='Vel Y (real)', color='b', linestyle='--')
+    ax2.plot(sim_time, -sim_vel_y, color='b', label='Lin Vel Y (sim)')
+    ax2.plot(real_time, real_vy, color='b', linestyle='--', label='Lin Vel Y (real)')
 
-    ax2.plot(real_data['Time'], vx_diff, 
-            color='grey', label='real vx - sim vx (diff)', 
-            linestyle=':', linewidth=3)
+    ax2.plot(real_time, vx_diff, color='grey', linestyle=':', linewidth=3, label='vx diff')
 
-    real_jerk = np.gradient(real_data['ax'], real_data['Time'])
+    # real_jerk = np.gradient(real_data['ax'].values[real_mask], real_time)
 
-    # Plot acceleration on ax2b (middle y-axis)
-    ax2b.plot(time[start_idx:end_idx], acceleration, 
-            color='r', label='Acceleration (sim)')
-    ax2b.plot(real_data['Time'], real_data['ax'], 
-            color='r', linestyle='--', label='Acceleration (data)')
+    # ax2b.plot(sim_time, acceleration, color='r', label='Acceleration (sim)')
+    # ax2b.plot(real_time, real_data['ax'].values[real_mask], color='r', linestyle='--', label='Acceleration (real)')
 
-    # Plot jerk on ax2c (right y-axis)
-    # ax2c.plot(time[start_idx:end_idx], jerk, 
-    #         color='purple', label='jerk (sim)')
-    # ax2c.plot(real_data['Time'], real_jerk, 
-    #         color='purple', linestyle='--', label='jerk (real)')
+    # ax2c.plot(sim_time, jerk, color='purple', label='Jerk (sim)')
 
-    # Customize axes
     ax2.set_ylabel("velocity [m/s]")
     ax2b.set_ylabel("acceleration [m/s²]", color='r')
     ax2b.tick_params(axis='y', labelcolor='r')
     ax2c.set_ylabel("jerk [m/s³]", color='purple')
     ax2c.tick_params(axis='y', labelcolor='purple')
 
-    # Offset the right spine of ax2c to make room
-    ax2c.spines['right'].set_position(('outward', 60))
-
-    # Combine legends
     lines2, labels2 = ax2.get_legend_handles_labels()
     lines2b, labels2b = ax2b.get_legend_handles_labels()
     lines2c, labels2c = ax2c.get_legend_handles_labels()
     ax2.legend(lines2 + lines2b + lines2c, labels2 + labels2b + labels2c, loc='upper right')
 
-    ax2.set_title("Linear Velocity, Acceleration and Jerk")
+    ax2.set_title("Linear Velocity, Acceleration, Jerk")
     ax2.grid(True)
 
-    # ---------------------------
-    # Subplot 3: Angular Velocity
-    # ---------------------------
-    ax3 = plt.subplot(4, 1, 3, sharex=ax1)
+    # ---- Subplot 3: Angular Velocity and Heading ----
+    ax3 = plt.subplot(4,1,3, sharex=ax1)
     ax3b = ax3.twinx()
 
-    ax3.plot(time[start_idx:end_idx], yaw_rate[start_idx:end_idx], 
-            color='g', label='Sim Ang Vel Z')
-    ax3.plot(real_data['Time'], real_data['omega'], 
-            label='Real Ang Vel Z', color='g', linestyle='--')
+    ax3.plot(sim_time, sim_yaw_rate, color='g', label='Sim Ang Vel Z')
+    ax3.plot(real_time, real_data['omega'].values[real_mask], color='g', linestyle='--', label='Real Ang Vel Z')
 
-    ax3b.plot(time[start_idx:end_idx], theta[start_idx:end_idx], 
-            color='r', label='Sim Theta')
-    ax3b.plot(real_data['Time'], real_data['theta'], 
-            label='Real theta', color='r', linestyle='--')
-
-    ax3b.set_ylabel("heading angle [rad]", color='r')
-    ax3b.tick_params(axis='y', labelcolor='r')
+    ax3b.plot(sim_time, sim_theta, color='r', label='Sim Theta')
+    ax3b.plot(real_time, real_theta, color='r', linestyle='--', label='Real Theta')
 
     ax3.set_ylabel("ang velocity [rad/s]")
-    ax3.legend()
-    ax3.grid(True)
-    ax3.set_title("Angular Velocity")
+    ax3b.set_ylabel("heading angle [rad]", color='r')
+    ax3b.tick_params(axis='y', labelcolor='r')
 
     lines3, labels3 = ax3.get_legend_handles_labels()
     lines3b, labels3b = ax3b.get_legend_handles_labels()
@@ -562,159 +553,41 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     ax3.set_title("Angular Velocity and Heading Angle")
     ax3.grid(True)
 
-    # ---------------------------
-    # Subplot 4: Position Difference
-    # ---------------------------
-    ax4 = plt.subplot(4, 1, 4, sharex=ax1)
-    # ax4.plot(real_data['Time'], xy_diff, 
-    #         label='xy pos diff', color='black')
-    ax4.plot(time[start_idx:end_idx], actions[start_idx:end_idx, 0, 0]*MAX_SPEED - vel_x[start_idx:end_idx], 
-            color='red', label='vel error')
-    ax4.plot(real_data['Time'], real_data['cmd_velocity'] - real_data['vx'], 
-            color='red', label='vel error', linestyle='--')
-    ax4.plot(real_data['Time'], vx_diff, 
-            color='blue', label='real vx - sim vx (diff)', 
-            linestyle=':', linewidth=3)
-    
+    # ---- Subplot 4: Velocity differences ----
+    ax4 = plt.subplot(4,1,4, sharex=ax1)
+
+    ax4.plot(sim_time, sim_speed_cmd*CONFIG['env_config']['MAX_SPEED_SCALING'] - sim_vel_x,
+            color='red', label='vel error (sim)')
+    ax4.plot(real_time, real_data['cmd_velocity'].values[real_mask] - real_vx,
+            color='red', linestyle='--', label='vel error (real)')
+    ax4.plot(real_time, vx_diff, color='blue', linestyle=':', linewidth=3, label='real vx - sim vx')
+
     ax4.set_xlabel("time [s]")
     ax4.set_ylabel("vel diff [m/s]")
     ax4.legend()
     ax4.grid(True)
-    ax4.set_title("velocities differences")
+    ax4.set_title("Velocities Differences")
 
     plt.tight_layout()
     plt.show()
 
-    # ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, 0, 1], color='b', label='Real Lin Vel ')
-    # ax1.plot(real_data['Time'], real_data['vy'], label='Real Vel Y', color='b', linestyle='--')
+    # --------------------------
+    # Plot trajectories
+    # --------------------------
+    plt.figure(figsize=(10, 8))
+    plt.plot(sim_x_interp, sim_y_interp, label='Simulated Trajectory', color='blue', linewidth=2)
+    plt.plot(real_x, real_y, label='Real Trajectory', color='red', linestyle='--', linewidth=2)
 
+    plt.scatter(sim_x_interp[0], sim_y_interp[0], color='blue', marker='o', s=100, label='Sim Start')
+    plt.scatter(real_x[0], real_y[0], color='red', marker='o', s=100, label='Real Start')
 
-    # ax1.plot(time[start_idx:end_idx], vel[start_idx:end_idx], label='Vel')
-    # ax1.plot(time[start_idx:end_idx], s_idx[start_idx:end_idx]/np.max(s_idx[start_idx:end_idx]), label='s_idx (normalized)')
-    # ax1.set_xlabel("time [s]")
-    # ax1.set_ylabel("velocity [m/s]")
-    # ax1.grid(True)
-
-    plt.figure(figsize=(10,10))
-    try:
-        plt.scatter(inner[:,0], inner[:,1], color='black')
-        plt.scatter(outer[:,0], outer[:,1], color='black')
-    except:
-        print('WARNING: could not plot data')
-    # Start and End for Simulated Data (offset to start from 0)
-
-
-    # Full Trajectories with Color Mapping
-    real = plt.scatter(real_data['x'], real_data['y'],                
-                    c=real_data['vx'], cmap='plasma', alpha=0.75)  
-
-    sim = plt.scatter(pos_xy[start_idx:end_idx,0], 
-                    pos_xy[start_idx:end_idx,1],                
-                    c=vel[start_idx:end_idx], cmap='coolwarm', alpha=0.75)
-
-    plt.scatter(0, 0, color='black', label='Start Position (sim)')  # Start is (0, 0)s
-    plt.scatter(pos_xy[-1,0], pos_xy[-1,1], color='red', label='End Position (sim)')
-
-    # Start and End for Real
-    plt.scatter(real_data['x'].iloc[0], real_data['y'].iloc[0], color='black', label='Start Position (data)')
-    plt.scatter(real_data['x'].iloc[-1], real_data['y'].iloc[-1], color='blue', label='End Position (data)')
-    
-    try:
-        # Plot specific points for comparison
-        plt.scatter(real_data['x'].iloc[40], real_data['y'].iloc[40], color='green', alpha=1)
-        plt.scatter(pos_xy[40,0], pos_xy[40,1], color = 'green')
-
-        plt.scatter(real_data['x'].iloc[80], real_data['y'].iloc[80], color='green', alpha=1)
-        plt.scatter(pos_xy[80,0], pos_xy[80,1], color = 'green')
-
-        plt.scatter(real_data['x'].iloc[120], real_data['y'].iloc[120], color='green', alpha=1)
-        plt.scatter(pos_xy[120,0], pos_xy[120,1], color = 'green')
-    except:
-        print('WARNING: could not plot data')
-
-    # Colorbars
-    cbar_real = plt.colorbar(real)
-    cbar = plt.colorbar(sim)
-
-    cbar_real.set_label('Velocity (m/s) (sim)')
-    cbar.set_label('Velocity (m/s) (real)')
-
+    plt.xlabel("X Position [m]")
+    plt.ylabel("Y Position [m]")
+    plt.title("Trajectory Comparison: Simulated vs Real")
     plt.legend()
-
-    cbar_real.set_label('Velocity (m/s) (real)')
-    cbar.set_label('Velocity (m/s) (sim)')
-
-
-    plt.legend()
-    plt.grid()
+    plt.axis('equal')  # keep aspect ratio correct
+    plt.grid(True)
     plt.show()
-
-    # vel = np.sqrt(np.square(observations[:, 0, 0]) + np.square(observations[:, 0, 1]))
-
-
-    # plt.figure(figsize=(15, 10))
-
-    # # Create subplots (2 rows, 1 column)
-    # ax1 = plt.subplot(2, 1, 1)  # Velocity plot
-    # ax2 = plt.subplot(2, 1, 2)  # Slip ratio plot
-
-    # # Calculate metrics
-    # wheel_ang_vel_mean = np.mean(observations[:, 0, 5:9], axis=1)
-    # wheel_lin_vel_mean = np.mean(observations[:, 0, 9:13], axis=1)
-    # slip_ratio = (wheel_ang_vel_mean*0.06/wheel_lin_vel_mean-1)
-
-    # # Plot 1: Velocities
-    # for env_idx in range(actions.shape[1]):
-    #     # Angular velocities (converted to linear by multiplying with radius)
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 5]*0.06, '--', color='red', alpha=0.5, label='BL ang_vel×r' if env_idx==0 else "")
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 6]*0.06, '--', color='orange', alpha=0.5, label='BR ang_vel×r' if env_idx==0 else "")
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 7]*0.06, '--', color='blue', alpha=0.5, label='FL ang_vel×r' if env_idx==0 else "")
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 8]*0.06, '--', color='cyan', alpha=0.5, label='FR ang_vel×r' if env_idx==0 else "")
-        
-    #     # Linear velocities
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 9], color='red', alpha=0.5, label='BL lin_vel' if env_idx==0 else "")
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 10], color='orange', alpha=0.5, label='BR lin_vel' if env_idx==0 else "")
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 11], color='blue', alpha=0.5, label='FL lin_vel' if env_idx==0 else "")
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 12], color='cyan', alpha=0.5, label='FR lin_vel' if env_idx==0 else "")
-
-    # # Plot mean values
-
-    # ax1.plot(time[start_idx:end_idx], wheel_ang_vel_mean[start_idx:end_idx]*0.06, '--', color='black', label='Mean ang_vel×r')
-    # ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 13]*0.06, '--', color='red', marker='x', label='Mean ang_speed×r')
-
-    # ax1.plot(time[start_idx:end_idx], wheel_lin_vel_mean[start_idx:end_idx], color='blue', marker='x', label='Mean lin_vel')
-    # ax1.plot(time[start_idx:end_idx], vel[start_idx:end_idx], color='purple', label='Base speed')
-
-    # ax1.set_ylabel('Velocity (m/s)')
-    # ax1.set_title('Wheel Velocities')
-    # ax1.legend()
-    # ax1.grid(True)
-
-    # # Plot 2: Slip Ratio
-    # for env_idx in range(actions.shape[1]):
-    #     # Individual wheel slip ratios
-    #     wheel_slip_BL = (observations[start_idx:end_idx, env_idx, 5]*0.06/observations[start_idx:end_idx, env_idx, 9])-1
-    #     wheel_slip_BR = (observations[start_idx:end_idx, env_idx, 6]*0.06/observations[start_idx:end_idx, env_idx, 10])-1
-    #     wheel_slip_FL = (observations[start_idx:end_idx, env_idx, 7]*0.06/observations[start_idx:end_idx, env_idx, 11])-1
-    #     wheel_slip_FR = (observations[start_idx:end_idx, env_idx, 8]*0.06/observations[start_idx:end_idx, env_idx, 12])-1
-        
-    #     ax2.plot(time[start_idx:end_idx], wheel_slip_BL, color='red', alpha=0.5, label='BL slip' if env_idx==0 else "")
-    #     ax2.plot(time[start_idx:end_idx], wheel_slip_BR, color='orange', alpha=0.5, label='BR slip' if env_idx==0 else "")
-    #     ax2.plot(time[start_idx:end_idx], wheel_slip_FL, color='blue', alpha=0.5, label='FL slip' if env_idx==0 else "")
-    #     ax2.plot(time[start_idx:end_idx], wheel_slip_FR, color='cyan', alpha=0.5, label='FR slip' if env_idx==0 else "")
-
-    # # Mean slip ratio
-    # ax2.plot(time[start_idx:end_idx], slip_ratio[start_idx:end_idx], color='black', label='Mean slip ratio')
-    # ax2.axhline(0, color='gray', linestyle='--')  # Reference line at zero slip
-
-    # ax2.set_xlabel('Time (s)')
-    # ax2.set_ylabel('Slip Ratio')
-    # ax2.set_title('Wheel Slip Ratios')
-    # ax2.legend()
-    # ax2.grid(True)
-
-    # plt.tight_layout()
-    # plt.show()
 
 def resample_time_series(original_time, original_values, new_time):
     """
@@ -756,85 +629,3 @@ def resample_time_series(original_time, original_values, new_time):
 
 if __name__ == "__main__":
     main()
-
-
-
-        # Plot actions
-
-    # plt.figure(figsize=(12, 4))
-    # for env_idx in range(actions.shape[1]):  # Loop through environments
-    #     plt.plot(time[start_idx:end_idx], actions[start_idx:end_idx, env_idx, 0], label=f'Env {env_idx} (Throttle)')
-    #     plt.plot(time[start_idx:end_idx], actions[start_idx:end_idx, env_idx, 1], '--', label=f'Env {env_idx} (Steering)')
-    #     # plt.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 5], '--', label=f'Env {env_idx} (ang vel y)')
-    # plt.xlabel("time [s]")
-    # plt.ylabel("Action Value")
-    # plt.title(POLICY+": Policy Actions Over Time")
-    # plt.legend()
-    # plt.grid()
-    # plt.show()
-    # vel = np.sqrt(np.square(observations[:, 0, 0]) + np.square(observations[:, 0, 1]))
-
-
-    # plt.figure(figsize=(15, 10))
-
-    # Create subplots (2 rows, 1 column)
-    # ax1 = plt.subplot(2, 1, 1)  # Velocity plot
-    # ax2 = plt.subplot(2, 1, 2)  # Slip ratio plot
-
-    # Calculate metrics
-    # wheel_ang_vel_mean = np.mean(observations[:, 0, 5:9], axis=1)
-    # wheel_lin_vel_mean = np.mean(observations[:, 0, 9:13], axis=1)
-    # slip_ratio = (wheel_ang_vel_mean*0.06/wheel_lin_vel_mean-1)
-
-    # Plot 1: Velocities
-    # for env_idx in range(actions.shape[1]):
-        # Angular velocities (converted to linear by multiplying with radius)
-        # ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 5]*0.06, '--', color='red', alpha=0.5, label='BL ang_vel×r' if env_idx==0 else "")
-        # ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 6]*0.06, '--', color='orange', alpha=0.5, label='BR ang_vel×r' if env_idx==0 else "")
-        # ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 7]*0.06, '--', color='blue', alpha=0.5, label='FL ang_vel×r' if env_idx==0 else "")
-        # ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 8]*0.06, '--', color='cyan', alpha=0.5, label='FR ang_vel×r' if env_idx==0 else "")
-        
-    #     # Linear velocities
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 9], color='red', alpha=0.5, label='BL lin_vel' if env_idx==0 else "")
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 10], color='orange', alpha=0.5, label='BR lin_vel' if env_idx==0 else "")
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 11], color='blue', alpha=0.5, label='FL lin_vel' if env_idx==0 else "")
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 12], color='cyan', alpha=0.5, label='FR lin_vel' if env_idx==0 else "")
-
-    # # Plot mean values
-
-    # ax1.plot(time[start_idx:end_idx], wheel_ang_vel_mean[start_idx:end_idx]*0.06, '--', color='black', label='Mean ang_vel×r')
-    # ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 13]*0.06, '--', color='red', marker='x', label='Mean ang_speed×r')
-
-    # ax1.plot(time[start_idx:end_idx], wheel_lin_vel_mean[start_idx:end_idx], color='blue', marker='x', label='Mean lin_vel')
-    # ax1.plot(time[start_idx:end_idx], vel[start_idx:end_idx], color='purple', label='Base speed')
-
-    # ax1.set_ylabel('Velocity (m/s)')
-    # ax1.set_title('Wheel Velocities')
-    # ax1.legend()
-    # ax1.grid(True)
-
-    # Plot 2: Slip Ratio
-    # for env_idx in range(actions.shape[1]):
-        # Individual wheel slip ratios
-        # wheel_slip_BL = (observations[start_idx:end_idx, env_idx, 5]*0.06/observations[start_idx:end_idx, env_idx, 9])-1
-        # wheel_slip_BR = (observations[start_idx:end_idx, env_idx, 6]*0.06/observations[start_idx:end_idx, env_idx, 10])-1
-        # wheel_slip_FL = (observations[start_idx:end_idx, env_idx, 7]*0.06/observations[start_idx:end_idx, env_idx, 11])-1
-        # wheel_slip_FR = (observations[start_idx:end_idx, env_idx, 8]*0.06/observations[start_idx:end_idx, env_idx, 12])-1
-        
-        # ax2.plot(time[start_idx:end_idx], wheel_slip_BL, color='red', alpha=0.5, label='BL slip' if env_idx==0 else "")
-        # ax2.plot(time[start_idx:end_idx], wheel_slip_BR, color='orange', alpha=0.5, label='BR slip' if env_idx==0 else "")
-        # ax2.plot(time[start_idx:end_idx], wheel_slip_FL, color='blue', alpha=0.5, label='FL slip' if env_idx==0 else "")
-        # ax2.plot(time[start_idx:end_idx], wheel_slip_FR, color='cyan', alpha=0.5, label='FR slip' if env_idx==0 else "")
-
-    # Mean slip ratio
-    # ax2.plot(time[start_idx:end_idx], slip_ratio[start_idx:end_idx], color='black', label='Mean slip ratio')
-    # ax2.axhline(0, color='gray', linestyle='--')  # Reference line at zero slip
-
-    # ax2.set_xlabel('Time (s)')
-    # ax2.set_ylabel('Slip Ratio')
-    # ax2.set_title('Wheel Slip Ratios')
-    # ax2.legend()
-    # ax2.grid(True)
-
-    # plt.tight_layout()
-    # plt.show()
