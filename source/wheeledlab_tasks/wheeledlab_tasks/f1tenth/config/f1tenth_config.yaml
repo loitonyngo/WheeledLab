@@ -1,18 +1,17 @@
 # config.yaml
 env_config:
-  MAP_NAME_LIST: ['ITA', 'AUT', 'BAH', 'SPA', 'BRA', 'DAY', 'JED', 'SPE_R', 'SPE', 'THETRACK', 'CTHETRACK_reverse_v0', 'icra25_v6', 'DCRL', 'CHN', 'TEST_1', 'GLC_smile_small', 'GLC_pit_rbring1', 'IND', 'SAU', 'SAU_R', 'OVA', 'OVA_R', 'CAT', 'TRE', 'IND_R', 'KEY', 'TR2', 'TR3', 'CRO_R', 'f', 'SPA', 'DUBIO_v1', 'HOOK_v0', 'HANGAR_v5', 'CTHETRACK_v1']
-  # MAP_NAME_LIST: ['GEN']
+  # MAP_NAME_LIST: ['ITA', 'AUT', 'BAH', 'SPA', 'BRA', 'DAY', 'JED', 'SPE_R', 'SPE', 'THETRACK', 'CTHETRACK_reverse_v0', 'icra25_v6', 'DCRL', 'CHN', 'TEST_1', 'GLC_smile_small', 'GLC_pit_rbring1', 'IND', 'SAU', 'SAU_R', 'OVA', 'OVA_R', 'CAT', 'TRE', 'IND_R', 'KEY', 'TR2', 'TR3', 'CRO_R', 'f', 'SPA', 'DUBIO_v1', 'HOOK_v0', 'HANGAR_v5', 'CTHETRACK_v1']
+  MAP_NAME_LIST: ['CIR1']
 
   ORIGIN_LIST: [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]] 
-  TRAJ_VISIBLE: False
-  BOUNDARY_VISIBLE: False
+  TRAJ_VISIBLE: True
+  BOUNDARY_VISIBLE: True
   # When comparing real data that don't use incremental it must always be set to False
   INCREMENTAL_MODE: True 
-  STEERING_INCREMENTAL_MODE: True # Steering incremental only if also throttle is incremental, otherwise is always false
-  # usually both true
+  STEERING_INCREMENTAL_MODE: True 
+  # When comparing real data set to false, otherwise true
   NON_TRAVERSABLE_TERMINATION: True
   RESET_RANDOM: True
-  PLAY_POLICY: False
 
   # Actutators limit2
   MAX_SPEED_INCREMENT: 0.12 # m/s /dt_decimation
@@ -23,12 +22,12 @@ env_config:
   STEERING_SIM_TO_REAL_SCALING: 1.0 # due to geometric model mismatch
 
   SPEED_OFFSET: 0
-  STEERING_OFFSET: 0.035
+  STEERING_OFFSET: 0.0
   VD_ENHANCED: False
 
-  RANDOMIZE_FRICTION: False
-  DYNAMIC_FRICTION: 0.75
-  STATIC_FRICTION: 0.75
+  RANDOMIZE_FRICTION: True
+  DYNAMIC_FRICTION: 0.70
+  STATIC_FRICTION: 0.70
   STD_FRICTION: 0.1
   NUM_BUCKETS_FRICTION: 10000
   RESTITUTION: 0.0
@@ -38,8 +37,6 @@ env_config:
   MAX_MASS_SCALE: 1.01
   RANDOMIZE_ACTUATOR_STEERING_GAIN: False
   RANDOMIZE_ACTUATOR_THROTTLE_GAIN: False
-
-
 
   # SIM_DT: Physics simulation time step
   # SIM_DECIMATION: Number of physics steps per simulation step; 
@@ -54,7 +51,7 @@ env_config:
   LEN_S_IDX: 0.1 # DON'T CHANGE!
   # SIM_DT: 0.003125
 
-  MIN_DELAY_STEERING: 30 # sim dt steps, e.g. 0.005*40 = 0.20s
+  MIN_DELAY_STEERING: 20 # sim dt steps, e.g. 0.005*40 = 0.20s
   MAX_DELAY_STEERING: 30
 
   MIN_DELAY_THROTTLE: 5  #sim dt steps
@@ -72,8 +69,8 @@ env_config:
   OPPONENT_COLLISION_CHECK_IDX: 3
 
   # Min distance allowable to walls (otherwise collision)
-  HARD_WALL_COLLISION_RADIUS: 0.20
-  SOFT_WALL_COLLISION_RADIUS: 0.20
+  HARD_WALL_COLLISION_RADIUS: 0.40
+  SOFT_WALL_COLLISION_RADIUS: 0.40
 
   # Max progress allowable (in idx), otherwise we consider it corner cutting
   MAX_PROGRESS_IDX: 10 

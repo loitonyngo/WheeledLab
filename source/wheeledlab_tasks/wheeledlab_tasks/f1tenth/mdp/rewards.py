@@ -9,9 +9,8 @@ from isaaclab.terrains import TerrainImporter
 from ..utils import find_frenet_coord_along_waypoints
 import isaaclab.envs.mdp as mdp
 
-import yaml
-with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/config/f1tenth_config.yaml", "r") as f:
-    CONFIG = yaml.safe_load(f)
+from wheeledlab_tasks.config_loader import load_config
+CONFIG = load_config()
     
 
 def wall_collision_penalty(env):

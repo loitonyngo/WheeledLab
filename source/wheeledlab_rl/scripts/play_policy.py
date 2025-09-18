@@ -13,26 +13,32 @@ This command will save data and record a video of the playback using an existing
 ###### BEGIN ISAACLAB SPINUP ######
 ###################################
 
+
 from wheeledlab_rl.startup import startup
 import argparse
 from datetime import datetime
 import pandas as pd
 import os
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.interpolate import interp1d
 
 parser = argparse.ArgumentParser(description="Play a policy in WheeledLab.")
-# These arguments assume that a run folder can be found
-# Add this line to accept the policy name as an argument
-# parser.add_argument("--policy", type=str, default='revived-durian-924', 
-#                    help="Policy name to use (default: revived-durian-924)")
 
-# It would be nice to define policy as args_cli 30 N 3.8 kg
 ###################################
 ###### DEFINE POLICY TO PLAY ######
 ###################################
-DEFAULT_LOGS_PATH = "/home/tongo/WheeledLab/source/wheeledlab_rl/logs/"
-POLICY = "TR2_TT_20z_vel01_steer010_fric80_buff10_del50_20_wrad575_nhor40ds5" 
-SAVE_NAME = 'test'
-SAVE_DIR = '/home/tongo/WheeledLab/source/wheeledlab_rl/output_play_policy'
+from pathlib import Path
+from datetime import datetime
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  
+# if this file is .../wheeledlab_rl/config/paths.py, this goes 2 levels up to "wheeledlab_rl"
+
+DEFAULT_LOGS_PATH = PROJECT_ROOT / "wheeledlab_rl" / "logs"
+SAVE_DIR = PROJECT_ROOT / "wheeledlab_rl" / "output_play_policy"
+
+POLICY = "CIR1_TT_20hz_vel12steer15fric75_nhor20ds10_del2505_buffer5_wall20_pendeltasteeringvariation"
+SAVE_NAME = "test_1"
 TIMESTAMP = datetime.now().strftime("%m%d_%H%M")
 
 ###################################
@@ -41,7 +47,7 @@ TIMESTAMP = datetime.now().strftime("%m%d_%H%M")
 
 
 parser.add_argument('-p', "--run-path", type=str, 
-                   default=DEFAULT_LOGS_PATH+POLICY, 
+                   default=DEFAULT_LOGS_PATH/POLICY, 
                    help="Path to run folder")
 
 parser.add_argument("--checkpoint", type=int, default=None, help="Checkpoint to load")
@@ -50,7 +56,7 @@ parser.add_argument("--task", type=str, default=None, help="Task name. Overrides
 parser.add_argument("--policy-path", type=str, default=None, help="Path to policy file.")
 
 # Playback
-parser.add_argument("--steps", type=int, default=200, help="Length of recorded video in steps")
+parser.add_argument("--steps", type=int, default=250, help="Length of recorded video in steps")
 # Logging
 parser.add_argument('-sd', "--save-data", action="store_true", default=True, help="Save episode data")
 parser.add_argument("--save-name", type=str, default=SAVE_NAME, help="Name save file.")
@@ -174,9 +180,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
         's_idx': [],
         'time': [],
         's_idx_max': [],
-        'inner_bounds': [],
-        'outer_bounds': [],
-        'vel_y_calc': [],
         'delta_s_opp_ego': []
     }
 
@@ -185,6 +188,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     # reset environment
     obs, _ = env.get_observations()
 
+    from wheeledlab_tasks.config_loader import load_config
+    CONFIG = load_config()
+    
     # simulate environment
     for time_idx in tqdm(range(args_cli.steps), desc="Playing policy"):
         # run everything in inference mode
@@ -196,46 +202,21 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
         data['observations'].append(obs)
         data['rewards'].append(rew)
         data['actions'].append(actions)
-        try:
-            data['theta'].append(extras['theta'])
-        except:
-            print('WARNING: could not store data')
-        try:
-            data['pos_xy'].append(extras['pos_xy'])
-        except:
-            print('WARNING: could not store data')
-        try:
-            data['vel_x'].append(extras['vel_x'])
-            data['vel_y'].append(extras['vel_y'])
-            data['vel_y_calc'].append(extras['vel_y_calc'])
-            data['yaw_rate'].append(extras['yaw_rate'])
-        except:
-            print('WARNING: could not store data')
-        try:
-            data['target_velocity'].append(extras['target_velocity'])
-            data['target_steering'].append(extras['target_steering'])
-
-        except:
-            print('WARNING: could not store data')
-        try:
-            data['s_idx'].append(extras['s_idx'])
-            data['s_idx_max'].append(extras['s_idx_max'])
-        except:
-            print('WARNING: could not store data')            
-        try:
-            data['time'].append(extras['time'])
-        except:
-            print('WARNING: could not store data')
-        try:
-           data['inner_bounds'].append(extras['inner'])
-           data['outer_bounds'].append(extras['outer'])
-        except:
-            print('WARNING: could not store data')
-        try:
-            data['delta_s_opp_ego'].append(extras['delta_s_opp_ego'])
-        except:
-            print('WARNING: could not store data')
-    print(time_idx)
+        
+        fields = [
+            'pos_xy', 'theta',
+            'vel_x', 'vel_y', 'yaw_rate',
+            'target_velocity', 'target_steering',
+            's_idx', 's_idx_max',
+            'time',
+        ]
+        
+        for field in fields:
+            value = extras.get(field)
+            if value is not None:
+                data[field].append(value)
+            else:
+                print(f'WARNING: could not store {field}')
     ###
 
 
@@ -244,28 +225,70 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     ########################
 
     if args_cli.save_data:
-        for key in data.keys():
-            try:
-                data[key] = torch.stack(data[key], dim=0)
-            except:
-                print('WARNING: could not torch.stack')
-                continue
-        
+        # Create a dedicated folder for this episode’s data
+        save_folder = os.path.join(SAVE_DIR, SAVE_NAME)
+        os.makedirs(save_folder, exist_ok=True)  # creates folder if it doesn't exist
+
         # Base filename without extension
-        base_name = os.path.join(SAVE_DIR, f"{args_cli.save_name}")
+        base_name = os.path.join(save_folder, f"{args_cli.save_name}")
         
         # Check if file exists and find appropriate suffix
         suffix = ""
         counter = 0
         while True:
-            save_path = f"{base_name}{suffix}.pt"
-            if not os.path.exists(save_path):
+            save_pt_path = f"{base_name}{suffix}.pt"
+            save_csv_path = f"{base_name}{suffix}.csv"
+            if not os.path.exists(save_pt_path) and not os.path.exists(save_csv_path):
                 break
             suffix = f"_{counter}"
             counter += 1
-        
-        torch.save(data, save_path)
-        print(f"[INFO] Saved episode data to: {save_path}")
+
+        # --- Save as .pt ---
+        for key in data.keys():
+            try:
+                data[key] = torch.stack(data[key], dim=0)
+            except Exception as e:
+                print(f'WARNING: could not torch.stack {key} ({e})')
+                continue
+
+        torch.save(data, save_pt_path)
+        print(f"[INFO] Saved episode data to: {save_pt_path}")
+
+        # --- Save selected fields as .csv ---
+        selected_fields = ["target_velocity", 'target_steering', "pos_xy", "theta", "vel_x", "vel_y", "yaw_rate", "s_idx", "time"]
+
+        df_dict = {}
+        lengths = []
+
+        for key in selected_fields:
+            if key not in data:
+                print(f"WARNING: {key} not found in data")
+                continue
+
+            tensor = data[key].cpu().squeeze()  # remove singleton dimensions
+
+            if key == "pos_xy":
+                df_dict["x"] = tensor[:, 0].numpy().astype(float)
+                df_dict["y"] = tensor[:, 1].numpy().astype(float)
+                lengths.append(tensor.shape[0])
+            else:
+                arr = tensor.numpy().astype(float)
+                df_dict[key] = arr
+                lengths.append(arr.shape[0])
+
+        # Align all arrays to the same length
+        min_len = min(lengths)
+        for k in df_dict:
+            df_dict[k] = df_dict[k][:min_len]
+
+        # Column order and renaming
+        col_order = ["time", "x", "y", "target_velocity", "target_steering", "theta", "vel_x", "vel_y", "yaw_rate", "s_idx"]
+        df = pd.DataFrame(df_dict)[col_order]
+        df.columns = ["time", "x", "y", "speed_cmd", "steering_cmd", "theta_rad", "vx_mps", "vy_mps", "psi_radps", "s_idx"]
+
+        df.to_csv(save_csv_path, index=False)
+        print(f"[INFO] Saved selected episode data to: {save_csv_path}")
+
 
     print("Done playing policy. Closing environment.")
     env.close()
@@ -275,134 +298,109 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
 ##############################################################
 
 
-    # Load the saved data
-    data_path = save_path
-    data = torch.load(data_path)
+   # --------------------------
+    # Load the saved CSV data
+    # --------------------------
+    sim_data = pd.read_csv(save_csv_path)
 
-    # Convert to numpy for plotting (if needed)
-    actions = np.clip(data['actions'].cpu().numpy(), -1, 1)           # Shape: [timesteps, num_envs, action_dim]
-    observations = data['observations'].cpu().numpy()  # Shape: [timesteps, num_envs, obs_dim]
-    time = data['time'].cpu().numpy()  
-    
-    s_idx = torch.squeeze(data['s_idx']).cpu().numpy()  
-    theta = torch.squeeze(data['theta']).cpu().numpy()
+    # --------------------------
+    # Convert sim CSV columns to numpy arrays
+    # --------------------------
+    actions      = sim_data.filter(like="actions").to_numpy()       # e.g., actions_0, actions_1...
+    pos_xy       = sim_data[['x', 'y']].to_numpy()
+    vel_x        = sim_data['vx_mps'].to_numpy()
+    vel_y        = sim_data['vy_mps'].to_numpy()
+    yaw_rate     = sim_data['psi_radps'].to_numpy()
+    s_idx        = sim_data['s_idx'].to_numpy()
+    theta        = sim_data['theta_rad'].to_numpy()
+    time         = sim_data['time'].to_numpy()
+    speed_cmd    = sim_data['speed_cmd'].to_numpy()
+    steering_cmd = sim_data['steering_cmd'].to_numpy()
 
-    # reset_idx = np.where(np.diff(s_idx)<(-np.max(s_idx)+10))
-    # start_idx = reset_idx[0][0] 
-    # end_idx = reset_idx[0][1] 
-    start_idx = 0 
-    end_idx = 1000
 
-    pos_xy = torch.squeeze(data['pos_xy']).cpu().numpy() 
-    vel_x = torch.squeeze(data['vel_x']).cpu().numpy() 
-    vel_y = torch.squeeze(data['vel_y']).cpu().numpy() 
-    vel_y_calc = torch.squeeze(data['vel_y_calc']).cpu().numpy()
-    yaw_rate = torch.squeeze(data['yaw_rate']).cpu().numpy() 
-    target_velocity = torch.squeeze(data['target_velocity']).cpu().numpy()
-    target_steering = torch.squeeze(data['target_steering']).cpu().numpy()
-    
-    vel = np.sqrt(np.square(vel_x) + np.square(vel_y))
-    acceleration = np.gradient(vel[start_idx:end_idx], time[start_idx:end_idx])
+    # --------------------------
+    # Compute derived quantities
+    # --------------------------
+    vel = np.sqrt(vel_x**2 + vel_y**2)
+    acceleration = np.gradient(vel, time)
+    jerk = np.gradient(acceleration, time)
 
-    try:
-        inner = torch.squeeze(data['inner_bounds']).cpu().numpy() 
-        outer = torch.squeeze(data['outer_bounds']).cpu().numpy() 
-    except:
-        print('WARNING try except')
+    # --------------------------
+    # Derived quantities
+    # --------------------------
+    vel = np.sqrt(vel_x**2 + vel_y**2)
+    acceleration = np.gradient(vel, time)
+    jerk = np.gradient(acceleration, time)
 
-    try:
-        delta_s_opp_ego = torch.squeeze(data['delta_s_opp_ego']).cpu().numpy() 
-    except:
-        print('WARNING try except')
-        
-    # actions[start_idx:end_idx, 0, 0] =  np.clip(actions[start_idx:end_idx, 0, 0], a_max=0.5, a_min=-1)
- 
-    plt.figure(figsize=(15, 15))  # Adjusted height for 4 subplots
 
-    # ---------------------------
-    # Subplot 1: Command Velocity and Steering
-    # ---------------------------
-    ax1 = plt.subplot(4, 1, 1)
+    # --------------------------
+    # Plotting
+    # --------------------------
+    plt.figure(figsize=(15, 15))
+
+    # ---- Subplot 1: Command Velocity and Steering ----
+    ax1 = plt.subplot(4,1,1)
     ax1b = ax1.twinx()
 
-    # Plot velocity on ax1 (left y-axis)
-    # ax1.plot(time[start_idx:end_idx], (np.clip(actions[start_idx:end_idx, 0, 0], -0.5, 1))+vel_x[start_idx:end_idx], 
-    #         color='green', label='Model cmd velocity')
-    ax1.plot(time[start_idx:end_idx], target_velocity[start_idx:end_idx], 
+    ax1.plot(time, speed_cmd,
             color='green', label='Model cmd velocity')
 
-    # # Plot steering on ax1b (right y-axis)
-    ax1b.plot(time[start_idx:end_idx],  target_steering[start_idx:end_idx], 
+    ax1b.plot(time, steering_cmd,
             color='blue', label='Model cmd steering')
 
-    # Customize axes
+
     ax1.set_ylabel('Velocity', color='green')
     ax1b.set_ylabel('Steering Angle', color='blue')
     ax1.tick_params(axis='y', colors='green')
     ax1b.tick_params(axis='y', colors='blue')
 
-    # Combine legends
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines1b, labels1b = ax1b.get_legend_handles_labels()
     ax1.legend(lines1 + lines1b, labels1 + labels1b, loc='upper right')
     ax1.set_title(f"{POLICY}: Command Velocity and Steering")
     ax1.grid(True)
 
-    # ---------------------------
-    # Subplot 2: Linear Velocity and Acceleration
-    # ---------------------------
-    ax2 = plt.subplot(4, 1, 2, sharex=ax1)
+    # ---- Subplot 2: Linear Velocity, Acceleration, Jerk ----
+    ax2 = plt.subplot(4,1,2, sharex=ax1)
     ax2b = ax2.twinx()
+    ax2c = ax2.twinx()
+    ax2c.spines['right'].set_position(('outward', 60))
 
-    # Plot linear velocities
-    ax2.plot(time[start_idx:end_idx], target_velocity[start_idx:end_idx], 
-            color='black', label='Model cmd velocity')
-    ax2.plot(time[start_idx:end_idx], vel_x[start_idx:end_idx], 
-            color='g', label='Lin Vel X (sim)')
-    # ax2.plot(time[start_idx:end_idx], np.cumsum(np.clip(actions[start_idx:end_idx, 0, 0]*0.15, -0.15, 0.15)), 
-    #         color='lime', label='Model cmd velocity')
-    
-    ax2.plot(time[start_idx:end_idx], -vel_y[start_idx:end_idx], 
-            color='b', label='Lin Vel Y (sim)')
-    ax2.plot(time[start_idx:end_idx], vel_y_calc[start_idx:end_idx], 
-            color='b', linestyle = '--', label='Lin Vel Y (calculated)')
-    
-    # Plot acceleration
-    ax2b.plot(time[start_idx:end_idx], acceleration, 
-            color='r', label='Acceleration (sim)')
+    ax2.plot(time, vel_x, color='g', label='Lin Vel X (sim)')
 
-    # Customize axes
+    ax2.plot(time, -vel_y, color='b', label='Lin Vel Y (sim)')
+
+    # real_jerk = np.gradient(real_data['ax'].values[real_mask], time)
+
+    # ax2b.plot(time, acceleration, color='r', label='Acceleration (sim)')
+    # ax2b.plot(time, real_data['ax'].values[real_mask], color='r', linestyle='--', label='Acceleration (real)')
+
+    # ax2c.plot(time, jerk, color='purple', label='Jerk (sim)')
+
     ax2.set_ylabel("velocity [m/s]")
     ax2b.set_ylabel("acceleration [m/s²]", color='r')
     ax2b.tick_params(axis='y', labelcolor='r')
+    ax2c.set_ylabel("jerk [m/s³]", color='purple')
+    ax2c.tick_params(axis='y', labelcolor='purple')
 
-    # Combine legends
     lines2, labels2 = ax2.get_legend_handles_labels()
     lines2b, labels2b = ax2b.get_legend_handles_labels()
-    ax2.legend(lines2 + lines2b, labels2 + labels2b, loc='upper right')
-    ax2.set_title("Linear Velocity and Acceleration")
+    lines2c, labels2c = ax2c.get_legend_handles_labels()
+    ax2.legend(lines2 + lines2b + lines2c, labels2 + labels2b + labels2c, loc='upper right')
+
+    ax2.set_title("Linear Velocity, Acceleration, Jerk")
     ax2.grid(True)
 
-    # ---------------------------
-    # Subplot 3: Angular Velocity
-    # ---------------------------
-    ax3 = plt.subplot(4, 1, 3, sharex=ax1)
+    # ---- Subplot 3: Angular Velocity and Heading ----
+    ax3 = plt.subplot(4,1,3, sharex=ax1)
     ax3b = ax3.twinx()
 
-    ax3.plot(time[start_idx:end_idx], yaw_rate[start_idx:end_idx], 
-            color='g', label='Sim Ang Vel Z')
-
-
-    ax3b.plot(time[start_idx:end_idx], theta[start_idx:end_idx], 
-            color='r', label='Sim Theta')
-
-    ax3b.set_ylabel("heading angle [rad]", color='r')
-    ax3b.tick_params(axis='y', labelcolor='r')
+    ax3.plot(time, yaw_rate, color='g', label='Sim Ang Vel Z')
+    ax3b.plot(time, theta, color='r', label='Sim Theta')
 
     ax3.set_ylabel("ang velocity [rad/s]")
-    ax3.legend()
-    ax3.grid(True)
-    ax3.set_title("Angular Velocity")
+    ax3b.set_ylabel("heading angle [rad]", color='r')
+    ax3b.tick_params(axis='y', labelcolor='r')
 
     lines3, labels3 = ax3.get_legend_handles_labels()
     lines3b, labels3b = ax3b.get_legend_handles_labels()
@@ -410,60 +408,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     ax3.set_title("Angular Velocity and Heading Angle")
     ax3.grid(True)
 
-    try:
-        ax4 = plt.subplot(4, 1, 4, sharex=ax1)
-        # ax4.plot(real_data['Time'], xy_diff, 
-        #         label='xy pos diff', color='black')
-        ax3.set_title("Offset Cmd delta_s_opp_ego")
-
-        ax4.plot(time[start_idx:end_idx], delta_s_opp_ego[start_idx:end_idx], 
-                color='red', label='delta_s_opp_ego')
-        ax3.legend()
-
-        ax4.grid(True)
-
-        # ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, 0, 1], color='b', label='Real Lin Vel ')
-        # ax1.plot(real_data['Time'], real_data['vy'], label='Real Vel Y', color='b', linestyle='--')
 
 
-        # ax1.plot(time[start_idx:end_idx], vel[start_idx:end_idx], label='Vel')
-        # ax1.plot(time[start_idx:end_idx], s_idx[start_idx:end_idx]/np.max(s_idx[start_idx:end_idx]), label='s_idx (normalized)')
-        # ax1.set_xlabel("time [s]")
-        # ax1.set_ylabel("velocity [m/s]")
-        # ax1.grid(True)
-    except:
-        None
-        
-    plt.figure(figsize=(10,10))
-    try:
-        plt.scatter(inner[:,0], inner[:,1], color='black')
-        plt.scatter(outer[:,0], outer[:,1], color='black')
-    except:
-        print('WARNING: could not plot data')
-    # Start and End for Simulated Data (offset to start from 0)
+    # --------------------------
+    # Plot trajectories
+    # --------------------------
+    plt.figure(figsize=(10, 8))
+    plt.plot(pos_xy[:,0], pos_xy[:,1], label='Simulated Trajectory', color='blue', linewidth=2)
 
-
-
-
-    sim = plt.scatter(pos_xy[start_idx:end_idx,0], 
-                    pos_xy[start_idx:end_idx,1],                
-                    c=vel[start_idx:end_idx], cmap='coolwarm', alpha=0.75)
-
-    plt.scatter(0, 0, color='black', label='Start Position (sim)')  # Start is (0, 0)s
-    plt.scatter(pos_xy[-1,0], pos_xy[-1,1], color='red', label='End Position (sim)')
-
-    # Colorbars
-    cbar = plt.colorbar(sim)
-
-    cbar.set_label('Velocity (m/s) (real)')
-
+    plt.xlabel("X Position [m]")
+    plt.ylabel("Y Position [m]")
+    plt.title("Trajectory Comparison: Simulated vs Real")
     plt.legend()
-
-    cbar.set_label('Velocity (m/s) (sim)')
-
-
-    plt.legend()
-    plt.grid()
+    plt.axis('equal')  # keep aspect ratio correct
+    plt.grid(True)
     plt.show()
 
 

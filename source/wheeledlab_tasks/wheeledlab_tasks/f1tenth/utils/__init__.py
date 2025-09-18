@@ -8,8 +8,8 @@ from .maps_utils import *
 
 import time
 import random 
-with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/config/f1tenth_config.yaml", "r") as f:
-    CONFIG = yaml.safe_load(f)
+from wheeledlab_tasks.config_loader import load_config
+CONFIG = load_config()
     
 def create_maps_from_waypoints(maps_folder_path, map_name_list, origin_list, stage_path, resolution):
     """

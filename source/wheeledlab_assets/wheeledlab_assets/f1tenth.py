@@ -4,9 +4,8 @@ from isaaclab.assets import ArticulationCfg
 
 from . import WHEELEDLAB_ASSETS_DATA_DIR
 
-import yaml
-with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/config/f1tenth_config.yaml", "r") as f:
-    CONFIG = yaml.safe_load(f)
+from wheeledlab_tasks.config_loader import load_config
+CONFIG = load_config()
 
 # F1Tenth 4WD actuator configuration.
 # For 4WD, all throttle joints (front and back) are active.

@@ -1,9 +1,9 @@
 from isaaclab.utils import configclass
 
 from wheeledlab.envs.mdp import RCCar4WDActionCfg, RCCarRWDActionCfg
-import yaml
-with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/config/f1tenth_config.yaml", "r") as f:
-    CONFIG = yaml.safe_load(f)
+from wheeledlab_tasks.config_loader import load_config
+
+CONFIG = load_config()
 
 
 @configclass

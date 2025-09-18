@@ -56,10 +56,13 @@ import yaml  # Add this import at the top of your file
 from pathlib import Path
 from typing import List  # For type hints
 
-with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/config/f1tenth_config.yaml", "r") as f:
-    CONFIG = yaml.safe_load(f)
+from wheeledlab_tasks.config_loader import load_config
+CONFIG = load_config()
 
+from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  # adjust levels as needed
+MAPS_FOLDER_PATH = PROJECT_ROOT / "wheeledlab_tasks" / "f1tenth" / "utils" / "maps"
 ##############################
 ###### OBSERVATION #######
 ##############################
@@ -797,7 +800,7 @@ class F1TenthOvertakeRLEnvCfg(ManagerBasedRLEnvCfg):
 
         
         # Folder where you have the maps (race stack format)
-        maps_folder_path = '/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/utils/maps'    
+        maps_folder_path = MAPS_FOLDER_PATH
 
         ############################
         # IT IS IMPORTANT THE ORDER; 

@@ -12,9 +12,7 @@ This command will save data and record a video of the playback using an existing
 ###################################
 ###### BEGIN ISAACLAB SPINUP ######
 ###################################
-import yaml
-with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/config/f1tenth_config.yaml", "r") as f:
-    CONFIG = yaml.safe_load(f)
+
 
 from wheeledlab_rl.startup import startup
 import argparse
@@ -29,23 +27,28 @@ parser = argparse.ArgumentParser(description="Play a policy in WheeledLab.")
 ###################################
 ###### DEFINE POLICY TO PLAY ######
 ###################################
-DEFAULT_LOGS_PATH = "/home/tongo/WheeledLab/source/wheeledlab_rl/logs/"
-POLICY = 'GEN_TT_20z_vel_12_steer15_fric75_nhor20ds10_del3010'
-SAVE_NAME = 'test_1'
-SAVE_DIR = '/home/tongo/WheeledLab/source/wheeledlab_rl/output_compare_sim_real'
-TIMESTAMP = datetime.now().strftime("%m%d_%H%M")
+from pathlib import Path
+from datetime import datetime
 
-REAL_DATA_DIR = "/home/tongo/WheeledLab/source/wheeledlab_rl/real_data/"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  
+# if this file is .../wheeledlab_rl/config/paths.py, this goes 2 levels up to "wheeledlab_rl"
+
+DEFAULT_LOGS_PATH = PROJECT_ROOT / "wheeledlab_rl" / "logs"
+SAVE_DIR = PROJECT_ROOT / "wheeledlab_rl" / "output_compare_sim_real"
+
+REAL_DATA_DIR = PROJECT_ROOT / "wheeledlab_rl" / "rosbag_data_csv"
 REAL_DATA_NAME = "CIR1_STMPC_tt.csv"
-
 REAL_DATA_PATH = os.path.join(REAL_DATA_DIR, REAL_DATA_NAME)
+POLICY = "CIR0_TT_20z_vel_12_steer15_fric75_nhor20ds10_del2505_buffer5_wall20"
+SAVE_NAME = "test_1"
+TIMESTAMP = datetime.now().strftime("%m%d_%H%M")
 ###################################
 ###################################
 ###################################
 
 
 parser.add_argument('-p', "--run-path", type=str, 
-                   default=DEFAULT_LOGS_PATH+POLICY, 
+                   default=DEFAULT_LOGS_PATH/POLICY, 
                    help="Path to run folder")
 
 parser.add_argument("--checkpoint", type=int, default=None, help="Checkpoint to load")
@@ -54,7 +57,7 @@ parser.add_argument("--task", type=str, default=None, help="Task name. Overrides
 parser.add_argument("--policy-path", type=str, default=None, help="Path to policy file.")
 
 # Playback
-parser.add_argument("--steps", type=int, default=250, help="Length of recorded video in steps")
+parser.add_argument("--steps", type=int, default=500, help="Length of recorded video in steps")
 # Logging
 parser.add_argument('-sd', "--save-data", action="store_true", default=True, help="Save episode data")
 parser.add_argument("--save-name", type=str, default=SAVE_NAME, help="Name save file.")
@@ -186,6 +189,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     obs, _ = env.get_observations()
         
     real_data = pd.read_csv(REAL_DATA_PATH)
+
+    from wheeledlab_tasks.config_loader import load_config
+    CONFIG = load_config()
+
+    # Override environment parameters to compare data
+
+
 
     if args_cli.steps > len(real_data):
         cmd_steering = torch.zeros(args_cli.steps+1, device=env.unwrapped.device)

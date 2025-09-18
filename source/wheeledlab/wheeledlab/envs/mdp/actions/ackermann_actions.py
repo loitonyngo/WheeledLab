@@ -15,9 +15,9 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
     from . import actions_cfg
-import yaml
-with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/config/f1tenth_config.yaml", "r") as f:
-    CONFIG = yaml.safe_load(f)
+    
+from wheeledlab_tasks.config_loader import load_config
+CONFIG = load_config()
     
 class AckermannAction(ActionTerm):
     r"""

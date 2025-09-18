@@ -54,10 +54,13 @@ import yaml  # Add this import at the top of your file
 from pathlib import Path
 from typing import List  # For type hints
 
-with open("/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/config/f1tenth_config.yaml", "r") as f:
-    CONFIG = yaml.safe_load(f)
+from wheeledlab_tasks.config_loader import load_config
+CONFIG = load_config()
 
+from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  # adjust levels as needed
+MAPS_FOLDER_PATH = PROJECT_ROOT / "wheeledlab_tasks" / "f1tenth" / "utils" / "maps"
 ##############################
 ###### OBSERVATION #######
 ##############################
@@ -82,13 +85,13 @@ class F1TenthTimeTrialObsCfg:
         base_lin_vel_x_history = ObsTerm(
             func=base_lin_vel_x_history, 
             params={'mean_noise': 0,
-                    'std_noise': 0.0}            
+                    'std_noise': 0.25}            
             )
         
         base_ang_vel_z_history = ObsTerm(
             func=base_ang_vel_z_history, 
             params={'mean_noise': 0,
-                    'std_noise': 0.00}         
+                    'std_noise': 0.01}         
             )
 
 
@@ -427,7 +430,7 @@ class F1TenthTimeTrialRewardsCfg:
 
     var_steering_penalty =  RewTerm(
         func=var_steering_penalty,
-        weight=0.001,
+        weight=0.05,
     )
 
     # effort_throttle_penalty =  RewTerm(
@@ -444,10 +447,10 @@ class F1TenthTimeTrialRewardsCfg:
         func=effort_target_steering_angle_penalty,
         weight=0.2,
     )
-    # delta_steering_l2_penalty =  RewTerm(
-    #     func=delta_steering_l2_penalty,
-    #     weight=0.0,
-    # )
+    delta_steering_l2_penalty =  RewTerm(
+        func=delta_steering_l2_penalty,
+        weight=0.05,
+    )
     
     # delta_speed_cmd_penalty =  RewTerm(
     #     func=delta_speed_cmd_penalty,
@@ -482,9 +485,7 @@ class TimeTrialCurriculumCfg:
         }
     )
     
-    
-    
-    
+
     wall_collision_penalty = CurrTerm(
         func=increase_reward_weight_over_time,
         params={
@@ -653,9 +654,6 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
         self.viewer.lookat = [0.0, 0.0, -3.]
         self.sim.dt = CONFIG['env_config']['SIM_DT']
         self.decimation = CONFIG['env_config']['SIM_DECIMATION']
-        # self.sim.dt = 0.025/2
-        # self.decimation = 2
-        # self.sim.render_interval = self.decimation
         self.sim.render_interval = 10
 
         # Terminations config
@@ -671,10 +669,9 @@ class F1TenthTimeTrialRLEnvCfg(ManagerBasedRLEnvCfg):
         # Folder where you save the usd files, name can be optimized, now it is possible it creates the same files with different names
         stage_path = os.path.join(WHEELEDLAB_ASSETS_DATA_DIR, 'maps', timestamp + '_test.usd')
         ORIGIN_LIST = CONFIG['env_config']['ORIGIN_LIST']
-
         
         # Folder where you have the maps (race stack format)
-        maps_folder_path = '/home/tongo/WheeledLab/source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/utils/maps'    
+        maps_folder_path = MAPS_FOLDER_PATH
 
         ############################
         # IT IS IMPORTANT THE ORDER; 
