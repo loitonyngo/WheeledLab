@@ -139,6 +139,40 @@ def soft_wall_collision_penalty(env):
     # vel_x = mdp.base_lin_vel(env)[:, 0]
     return torch.where(collision_bool.bool(), -1, 0)
 
+def side_slip_penalty(env, min_vel_x: float = 2.5, slip_thresh: float = 0.12, max_slip_angle: float = 0.5):
+    """
+    Compute a side slip penalty for the robot car, linearly growing between 
+    slip_thresh and max_slip_angle, saturating beyond max_slip_angle.
+
+    Args:
+        env: Environment containing the robot.
+        min_vel_x: Minimum forward velocity for penalty to apply.
+        slip_thresh: Slip angle threshold (radians) below which no penalty is applied.
+        max_slip_angle: Maximum slip angle (radians) for saturation.
+
+    Returns:
+        torch.Tensor: Penalty proportional to slip angle above the threshold.
+    """
+    # Get robot linear velocity in world frame
+    vel = mdp.base_lin_vel(env)  # shape: [num_envs, 2]
+
+    # Compute side slip angle (radians)
+    slip_angle = torch.abs(torch.atan2(vel[..., 1], vel[..., 0]))
+
+    # Mask for environments moving fast enough
+    moving_mask = torch.abs(vel[..., 0]) >= min_vel_x
+
+    # Compute raw penalty above threshold
+    penalty = torch.clamp(slip_angle - slip_thresh, min=0.0)
+
+    # Apply saturation at max_slip_angle
+    penalty = torch.clamp(penalty, max=max_slip_angle - slip_thresh)
+
+    # Zero out penalty for environments not moving fast enough
+    penalty = penalty * moving_mask.float()
+
+    return -penalty
+
 def opponent_mean_delta_speed(env):
     # num_episodes = env.common_step_counter // env.max_episode_length
     # if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_UNTIL_EP']:
@@ -155,7 +189,47 @@ def opponent_mean_delta_speed(env):
 
     return -mean_vx_diff
 
+def delta_target_velocity_penalty(env, threshold: float = 0.5):
+    """
+    Penalize when the target velocity exceeds the actual velocity by more than a threshold.
 
+    Args:
+        env: The environment containing the robot.
+        threshold: Minimum difference (m/s) between target and actual velocity to trigger penalty.
+
+    Returns:
+        torch.Tensor: Penalty for each environment (shape: [num_envs]).
+    """
+    # Initialize history buffers if needed
+    if not hasattr(env, '_base_lin_vel_x_history'):
+        env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
+        env._base_lin_vel_x_history = torch.zeros(
+            (env.num_envs, env._obs_history_length),
+            dtype=torch.float32,
+            device=env.device
+        )
+
+    if not hasattr(env, '_target_velocity_history'):
+        env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
+        env._target_velocity_history = torch.zeros(
+            (env.num_envs, env._obs_history_length),
+            dtype=torch.float32,
+            device=env.device
+        )
+
+    # Get the latest actual and target velocities
+    actual_vel = env._base_lin_vel_x_history[:, 0]  # most recent actual velocity
+    target_vel = env._target_velocity_history[:, 0]  # most recent target velocity
+
+    # Compute delta
+    delta_v = target_vel - actual_vel
+
+    # Penalize only if delta_v exceeds threshold
+    penalty = -torch.clamp(delta_v - threshold, min=0.0)
+
+    return penalty
+    
+    
 def opponent_collision_penalty(env):
     # num_episodes = env.common_step_counter // env.max_episode_length
     # if num_episodes < CONFIG['env_config']['IGNORE_OPPONENT_UNTIL_EP']:
@@ -797,9 +871,20 @@ def progress_waypoint_bool(env):
     ###########################
     
     env.extras['vel_y_calc'] = env._vel_y_calc
+    # Get robot linear velocity in world frame
+    
+    vel = mdp.base_lin_vel(env)
+    # Compute side slip angle (radians)
+    slip_angle = torch.abs(torch.atan2(vel[..., 1], vel[..., 0]))
+    # Mask for environments moving fast enough
+    moving_mask = torch.abs(vel[..., 0]) >= 2
+    
+    env.extras['log']['Info/max_slip_angle'] = torch.max(slip_angle*moving_mask)
+    env.extras['log']['Info/mean_slip_angle'] = torch.mean(slip_angle*moving_mask)
 
     env.extras['log']['Info/mean_speed'] = torch.mean(env._base_lin_vel_x_history)
     env.extras['log']['Info/max_speed'] = torch.max(env._base_lin_vel_x_history)
+    env.extras['log']['Info/mean_delta_target_speed'] = torch.mean(torch.abs(env._target_steering_angle_history-env._base_lin_vel_x_history))
 
     return progress_bool, progress
 

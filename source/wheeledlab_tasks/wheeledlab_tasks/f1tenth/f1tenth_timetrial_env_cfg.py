@@ -85,9 +85,16 @@ class F1TenthTimeTrialObsCfg:
         base_lin_vel_x_history = ObsTerm(
             func=base_lin_vel_x_history, 
             params={'mean_noise': 0,
-                    'std_noise': 0.25}            
+                    'std_noise': 0.05}            
             )
+
+        # base_lin_vel_y_history = ObsTerm(
+        #     func=base_lin_vel_y_history, 
+        #     params={'mean_noise': 0,
+        #             'std_noise': 0.15}            
+        #     )
         
+                
         base_ang_vel_z_history = ObsTerm(
             func=base_ang_vel_z_history, 
             params={'mean_noise': 0,
@@ -415,9 +422,26 @@ class F1TenthTimeTrialRewardsCfg:
         
     wall_collision_penalty = RewTerm(
         func=wall_collision_penalty,
-        weight=1,
+        weight=0.5,
     )
 
+    soft_wall_collision_penalty = RewTerm(
+        func=soft_wall_collision_penalty,
+        weight=1.0,
+    )
+
+    side_slip_penalty = RewTerm(
+        func=side_slip_penalty,
+        weight=1.0,
+        params={
+            "slip_thresh": 0.12,
+        }
+    )
+
+    delta_target_velocity_penalty = RewTerm(
+        func=delta_target_velocity_penalty,
+        weight=1,
+    )
     # soft_wall_collision_penalty = RewTerm(
     #     func=soft_wall_collision_penalty,
     #     weight=0.5,

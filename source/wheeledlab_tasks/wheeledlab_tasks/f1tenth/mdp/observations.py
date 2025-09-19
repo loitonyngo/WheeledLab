@@ -55,23 +55,39 @@ def base_lin_vel_x_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sce
     base_lin_vel_x_history = env._base_lin_vel_x_history
     return base_lin_vel_x_history
 
-def base_lin_vel_y_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
-    """Root linear velocity in the asset's root frame. 2D, only x and y"""
-    # extract the used quantities (to enable type-hinting)
+def base_lin_vel_y_history(env: ManagerBasedEnv, 
+                           asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), 
+                           mean_noise=0, std_noise=0.15) -> torch.Tensor:
+    """Root linear velocity in the asset's root frame. 2D, only x and y, with noise preserving sign."""
+    
     asset: RigidObject = env.scene[asset_cfg.name]
-#     noise = torch.empty(size=asset.data.root_ang_vel_b[:,2].unsqueeze(-1).shape, device=env.device).normal_(mean=mean_noise, std=std_noise)
+    
     if not hasattr(env, '_base_lin_vel_y_history'):
         env._obs_history_length = CONFIG['env_config']['OBS_HISTORY_LENGTH']
         env._base_lin_vel_y_history = torch.zeros(
-            (env.num_envs, env._obs_history_length),  # Shape: (num_envs, history_length, n_actions)
+            (env.num_envs, env._obs_history_length),
             dtype=torch.float32,
             device=env.device
-            )
-    # shift the history to the right and insert the last angular velocity at the beginning
+        )
+    
+    vy = -asset.data.root_lin_vel_b[:, 1]
+
+    # Add Gaussian noise
+    if std_noise > 0:
+        noise = torch.randn_like(vy) * std_noise + mean_noise
+        vy_noisy = vy + noise
+
+        # Preserve sign
+        vy_noisy = torch.where(vy > 0, torch.clamp(vy_noisy, min=0.0), vy_noisy)
+        vy_noisy = torch.where(vy < 0, torch.clamp(vy_noisy, max=0.0), vy_noisy)
+        vy = vy_noisy
+
+    # Shift history and insert latest value
     env._base_lin_vel_y_history[:, 1:] = env._base_lin_vel_y_history[:, :-1].clone()
-    env._base_lin_vel_y_history[:, 0] = -asset.data.root_lin_vel_b[:,1]
-    base_lin_vel_y_history = env._base_lin_vel_y_history
-    return base_lin_vel_y_history
+    env._base_lin_vel_y_history[:, 0] = vy
+
+    return env._base_lin_vel_y_history
+
 
 def base_ang_vel_z_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
     """Root angular velocity in the asset's root frame. Only z, yaw rade"""
@@ -311,7 +327,7 @@ def track_info_horizon(
         cross_prods = (track_dirs[:,:,0]*car_offsets[:,:,1] - track_dirs[:,:,1]*car_offsets[:,:,0])
         signs = torch.sign(cross_prods)
         distances = torch.abs(cross_prods) / (torch.norm(track_dirs, dim=2) + 1e-6)
-        deviation_obs[mask] = signs * distances/1.5
+        deviation_obs[mask] = signs * distances
 
         # --- 2) Heading error ---
         lookahead_pts = waypoints_xy_world[horizon_indices[:, 1:]]
@@ -323,17 +339,17 @@ def track_info_horizon(
             torch.sin(desired_headings - map_head.unsqueeze(-1)),
             torch.cos(desired_headings - map_head.unsqueeze(-1))
         )
-        heading_obs[mask] = heading_errors/3.14
+        heading_obs[mask] = heading_errors
 
         # --- 3) Lateral space (d_lat) ---
         d_lat = env._d_lat_list[map_level][:, :2]
         next_dlat = d_lat[horizon_indices[:, 1:], :]
-        dlat_obs[mask] = next_dlat.reshape(-1, n_horizon*2)/1.5
+        dlat_obs[mask] = next_dlat.reshape(-1, n_horizon*2)
 
         # --- 4) Curvature (kappa) ---
         kappa_radpm = env._kappa_radpm_list[map_level][:]
         next_kappa = kappa_radpm[horizon_indices[:, 1:]].squeeze(-1)
-        kappa_obs[mask] = next_kappa/3.0
+        kappa_obs[mask] = next_kappa
 
     # Stack everything together
     return torch.cat([deviation_obs, heading_obs, dlat_obs, kappa_obs], dim=-1)
