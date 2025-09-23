@@ -87,33 +87,36 @@ class F1TenthOvertakeObsCfg:
         base_lin_vel_x_history = ObsTerm(
             func=base_lin_vel_x_history, 
             params={'mean_noise': 0,
-                    'std_noise': 0.5}            
+                    'std_noise': 0.05}            
             )
 
-        base_lin_acc_x_history = ObsTerm(
-            func=base_lin_acc_x_history, 
-            params={'mean_noise': 0,
-                    'std_noise': 0}            
-            )
+        # base_lin_vel_y_history = ObsTerm(
+        #     func=base_lin_vel_y_history, 
+        #     params={'mean_noise': 0,
+        #             'std_noise': 0.15}            
+        #     )
         
+                
         base_ang_vel_z_history = ObsTerm(
             func=base_ang_vel_z_history, 
             params={'mean_noise': 0,
-                    'std_noise': 0}         
+                    'std_noise': 0.01}         
             )
+
 
         target_velocity_history = ObsTerm(
             func=target_velocity_history, 
             params={'mean_noise': 0,
                     'std_noise': 0}         
             )
-
+        
+        
         target_steering_angle_history = ObsTerm(
             func=target_steering_angle_history, 
             params={'mean_noise': 0,
                     'std_noise': 0}         
             )
-                
+
         action_history = ObsTerm(
             func=action_history,
         )
@@ -123,7 +126,7 @@ class F1TenthOvertakeObsCfg:
             params={'delta_s_idx': DELTA_S_IDX,
                     'n_horizon': N_HORIZON,
                     't_horizon': T_HORIZON,
-                    'position_std_noise': 0.08}
+                    'position_std_noise': 0.0}
         )
         
         opponent_relative_info_history = ObsTerm(
@@ -524,10 +527,10 @@ class F1TenthOvertakeRewardsCfg:
         func=progress_rew,
         weight=1.0,
     )
-    average_vel = RewTerm(
-        func=average_vel,
-        weight=0.08,
-    )
+    # average_vel = RewTerm(
+    #     func=average_vel,
+    #     weight=0.08,
+    # )
         
     wall_collision_penalty = RewTerm(
         func=wall_collision_penalty,
@@ -537,6 +540,19 @@ class F1TenthOvertakeRewardsCfg:
     soft_wall_collision_penalty = RewTerm(
         func=soft_wall_collision_penalty,
         weight=0.05,
+    )
+
+    side_slip_penalty = RewTerm(
+        func=side_slip_penalty,
+        weight=0.5,
+        params={
+            "slip_thresh": 0.14,
+        }
+    )
+
+    delta_target_velocity_penalty = RewTerm(
+        func=delta_target_velocity_penalty,
+        weight=0.5,
     )
     
     opponent_collision_penalty = RewTerm(
@@ -554,10 +570,10 @@ class F1TenthOvertakeRewardsCfg:
         weight=0.0,
     )
 
-    # opponent_overtake_delta_distance_reward = RewTerm(
-    #     func=opponent_overtake_delta_distance_reward,
-    #     weight=0.5,
-    # )
+    opponent_overtake_delta_distance_reward = RewTerm(
+        func=opponent_overtake_delta_distance_reward,
+        weight=0.5,
+    )
 
     # opponent_mean_delta_speed = RewTerm(
     #     func=opponent_mean_delta_speed,
@@ -569,37 +585,55 @@ class F1TenthOvertakeRewardsCfg:
     #     weight=0.1,
     # )
 
+    delta_target_velocity_penalty = RewTerm(
+        func=delta_target_velocity_penalty,
+        weight=1,
+    )
+    # soft_wall_collision_penalty = RewTerm(
+    #     func=soft_wall_collision_penalty,
+    #     weight=0.5,
+    # )
+
+    var_throttle_penalty =  RewTerm(
+        func=var_throttle_penalty,
+        weight=0.001,
+    )
+
+    var_steering_penalty =  RewTerm(
+        func=var_steering_penalty,
+        weight=0.01,
+    )
+
+    # effort_throttle_penalty =  RewTerm(
+    #     func=effort_throttle_penalty,
+    #     weight=0.0,
+    # )
+    
+    effort_steering_penalty =  RewTerm(
+        func=effort_steering_penalty,
+        weight=0.02,
+    )
+
+    effort_abs_steering_penalty =  RewTerm(
+        func=effort_target_steering_angle_penalty,
+        weight=0.01,
+    )
+    delta_steering_l2_penalty =  RewTerm(
+        func=delta_steering_l2_penalty,
+        weight=0.025,
+    )
+    
+    # delta_speed_cmd_penalty =  RewTerm(
+    #     func=delta_speed_cmd_penalty,
+    #     weight=0.000,
+    # )
+
     # var_throttle_rate_penalty =  RewTerm(
     #     func=var_throttle_rate_penalty,
     #     weight=0.00,
     # )
-    
-    var_throttle_penalty =  RewTerm(
-        func=var_throttle_penalty,
-        weight=0.01,
-    )
-    
-    var_steering_penalty =  RewTerm(
-        func=var_steering_penalty,
-        weight=0.001,
-    )
-
-    effort_throttle_penalty =  RewTerm(
-        func=effort_throttle_penalty,
-        weight=0.0,
-    )
-    
-    effort_steering_penalty =  RewTerm(
-        func=effort_steering_penalty,
-        weight=0.001,
-    )
-
-    effort_steering_penalty =  RewTerm(
-        func=effort_target_steering_angle_penalty,
-        weight=0.1,
-    )
-    # low_speed_penalty =  RewTerm(
-    #     func=low_speed_penalty,
+    # delta_throttle_l2_penalty =  RewTerm(
+    #     func=delta_throttle_l2_penalty,
     #     weight=0.0,
     # )
 

@@ -432,9 +432,9 @@ class F1TenthTimeTrialRewardsCfg:
 
     side_slip_penalty = RewTerm(
         func=side_slip_penalty,
-        weight=1.0,
+        weight=0.5,
         params={
-            "slip_thresh": 0.12,
+            "slip_thresh": 0.14,
         }
     )
 
@@ -454,7 +454,7 @@ class F1TenthTimeTrialRewardsCfg:
 
     var_steering_penalty =  RewTerm(
         func=var_steering_penalty,
-        weight=0.05,
+        weight=0.01,
     )
 
     # effort_throttle_penalty =  RewTerm(
@@ -469,11 +469,11 @@ class F1TenthTimeTrialRewardsCfg:
 
     effort_abs_steering_penalty =  RewTerm(
         func=effort_target_steering_angle_penalty,
-        weight=0.2,
+        weight=0.01,
     )
     delta_steering_l2_penalty =  RewTerm(
         func=delta_steering_l2_penalty,
-        weight=0.05,
+        weight=0.025,
     )
     
     # delta_speed_cmd_penalty =  RewTerm(
