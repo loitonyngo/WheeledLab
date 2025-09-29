@@ -464,7 +464,7 @@ class F1TenthTimeTrialRewardsCfg:
     
     effort_steering_penalty =  RewTerm(
         func=effort_steering_penalty,
-        weight=0.02,
+        weight=0.08,
     )
 
     effort_abs_steering_penalty =  RewTerm(

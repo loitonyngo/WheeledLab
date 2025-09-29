@@ -12,7 +12,7 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M")
 class RSS_TIMETRIAL(RslRlRunConfig):
     env_setup = EnvSetup(
         num_envs=4096,
-        env_spacing= 16,
+        env_spacing= 12,
         task_name="Isaac-F1TenthTimeTrialRL-v0"
     )
     # unique-jazz-683

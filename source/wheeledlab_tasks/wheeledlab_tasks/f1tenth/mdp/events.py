@@ -304,7 +304,7 @@ def reset_root_state_random_with_opponent(
     opponent_asset: RigidObject | Articulation = env.scene[opponent_asset_cfg.name]
     terrain: TerrainImporter = env.scene.terrain
 
-    _init_common_histories(env)
+    _init_common_histories(env, env_ids)
     env._map_levels[env_ids] = torch.tensor(np.floor(np.random.rand(len(env_ids))*len(env.cfg.scene.terrain.traversability_hashmap_list)), device = env.device, dtype=torch.long)
 
     ego_valid_poses, ego_idx_np, opp_valid_poses, opp_idx_np = terrain.cfg.generate_random_poses_from_waypoints_with_opponent(
@@ -327,7 +327,7 @@ def reset_root_state_start_idx(
     terrain: TerrainImporter = env.scene.terrain
 
     # 1. Ensure histories exist
-    _init_common_histories(env)
+    _init_common_histories(env, env_ids)
 
     # 2. Sample poses from start indices
     valid_poses, current_idx_np = terrain.cfg.generate_start_idx_poses(
@@ -493,7 +493,7 @@ def move_opponent_s_based(
                     torch.where(
                         env.episode_length_buf[combined_mask] < CONFIG['env_config']['OPPONENT_STARTS_MOVING_AFTER_STEP'],
                         opp_idx,
-                        (opp_idx + move_steps + np.random.randint(low=1, high=2)) % len(traj_xy)
+                        (opp_idx + torch.where(move_steps>0, move_steps, 1)) % len(traj_xy)
                     )
                 )
 
@@ -505,6 +505,8 @@ def move_opponent_s_based(
                 new_positions[combined_mask, 0] = pos[:, 0] + env.scene.env_origins[combined_mask, 0] 
                 new_positions[combined_mask, 1] = pos[:, 1] + env.scene.env_origins[combined_mask, 1] 
 
+                env._opponent_xy_position[combined_mask,:] = pos.clone()
+                 
                 # Speed as displacement / dt
                 disp = pos - opp_position_xy[combined_mask]
                 env._opponent_speed[combined_mask] = torch.norm(disp, dim=1) / CONFIG['env_config']['OPP_MOVE_DT']
@@ -648,7 +650,7 @@ def move_opponent_s_based(
                 torch.where(
                     env.episode_length_buf[map_mask] < CONFIG['env_config']['OPPONENT_STARTS_MOVING_AFTER_STEP'],
                     opp_idx,
-                    (opp_idx + move_steps + np.random.randint(low=1, high=2)) % len(traj_xy)
+                    (opp_idx + torch.where(move_steps>0, move_steps, 1)) % len(traj_xy)
                 )
             )
 

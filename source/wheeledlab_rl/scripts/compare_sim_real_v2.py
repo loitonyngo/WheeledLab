@@ -13,7 +13,6 @@ This command will save data and record a video of the playback using an existing
 ###### BEGIN ISAACLAB SPINUP ######
 ###################################
 
-
 from wheeledlab_rl.startup import startup
 import argparse
 from datetime import datetime
@@ -30,28 +29,34 @@ parser = argparse.ArgumentParser(description="Play a policy in WheeledLab.")
 from pathlib import Path
 from datetime import datetime
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]  
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 # if this file is .../wheeledlab_rl/config/paths.py, this goes 2 levels up to "wheeledlab_rl"
 
 DEFAULT_LOGS_PATH = PROJECT_ROOT / "wheeledlab_rl" / "logs"
-SAVE_DIR = PROJECT_ROOT / "wheeledlab_rl" / "output_compare_sim_real" / "results_throttle_traction_control"
+SAVE_DIR = PROJECT_ROOT / "wheeledlab_rl" / "output_compare_sim_real" / "MT_results"
 
 REAL_DATA_DIR = PROJECT_ROOT / "wheeledlab_rl" / "rosbag_data_csv"
-REAL_DATA_NAME = "CIR1_MPC.csv"
+# bb_speed_3_angle_3_p_2, -np.pi * 1.97
+# speed_3_angle_1_n, ROTATE_TRAJ_ANGLE = -np.pi * 1.57
+
+REAL_DATA_NAME = "bb_speed_3_angle_3_p_2.csv"
 REAL_DATA_PATH = os.path.join(REAL_DATA_DIR, REAL_DATA_NAME)
-POLICY = "CIR0_0920_40hz_sp10_st10_off004_fr65_del3005_hist10_wall34_nhor20_3s_correctedobsnorm"
-SAVE_NAME = "corrected_braking"
+POLICY = "CIR0_0920_40hz_sp10_st10_off004_fr75_del3005_hist10_wall34_nhor20_3s_correctedobsnorm"
+SAVE_NAME = "bb_speed_3_angle_3_p_2"
 TIMESTAMP = datetime.now().strftime("%m%d_%H%M")
 
-ROTATE_TRAJ_ANGLE = -np.pi*1.2
+ROTATE_TRAJ_ANGLE = -np.pi * 2.07
 ###################################
 ###################################
 ###################################
 
-
-parser.add_argument('-p', "--run-path", type=str, 
-                   default=DEFAULT_LOGS_PATH/POLICY, 
-                   help="Path to run folder")
+parser.add_argument(
+    "-p",
+    "--run-path",
+    type=str,
+    default=DEFAULT_LOGS_PATH / POLICY,
+    help="Path to run folder",
+)
 
 parser.add_argument("--checkpoint", type=int, default=None, help="Checkpoint to load")
 # If no run folder, the task and policy model must be provided
@@ -59,14 +64,18 @@ parser.add_argument("--task", type=str, default=None, help="Task name. Overrides
 parser.add_argument("--policy-path", type=str, default=None, help="Path to policy file.")
 
 # Playback
-parser.add_argument("--steps", type=int, default=1000, help="Length of recorded video in steps")
+parser.add_argument("--steps", type=int, default=230, help="Length of recorded video in steps")
 # Logging
-parser.add_argument('-sd', "--save-data", action="store_true", default=True, help="Save episode data")
+parser.add_argument("-sd", "--save-data", action="store_true", default=True, help="Save episode data")
 parser.add_argument("--save-name", type=str, default=SAVE_NAME, help="Name save file.")
 
 parser.add_argument("--video", action="store_true", help="Record video of the playback")
-parser.add_argument("--log-dir", type=str, default="playback/",
-                    help="Directory to save logs. If run path is provided, this is ignored.")
+parser.add_argument(
+    "--log-dir",
+    type=str,
+    default="playback/",
+    help="Directory to save logs. If run path is provided, this is ignored.",
+)
 parser.add_argument("--play-name", type=str, default="play-name", help="Name of the playback")
 
 simulation_app, args_cli = startup(parser=parser)
@@ -92,13 +101,9 @@ from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
 from wheeledlab_rl.configs import RunConfig
 from wheeledlab_rl.utils import ClipAction
 
-import matplotlib.pyplot as plt
-import numpy as np
-
 from scipy.interpolate import interp1d
 
 def resample_1d(t_src, y_src, t_new):
-    
     """Safe 1D resampling with sorting and duplicate-time handling."""
     t_src = np.asarray(t_src, dtype=float)
     y_src = np.asarray(y_src, dtype=float)
@@ -117,11 +122,11 @@ def resample_1d(t_src, y_src, t_new):
 
 # Resolve paths
 FROM_RUN = args_cli.run_path is not None
-if FROM_RUN: # Load paths for run folder
+if FROM_RUN:  # Load paths for run folder
 
     # Load run config
     path_to_run_cfg_pkl = os.path.join(args_cli.run_path, "run_config.pkl")
-    run_cfg: RunConfig = load_pickle(path_to_run_cfg_pkl) # load_yaml does not work on slices
+    run_cfg: RunConfig = load_pickle(path_to_run_cfg_pkl)  # load_yaml does not work on slices
     run_agent_cfg = run_cfg.agent
     task = run_cfg.env_setup.task_name if args_cli.task is None else args_cli.task
     agent_entry_point = None
@@ -131,8 +136,9 @@ if FROM_RUN: # Load paths for run folder
     fp = os.path.abspath(args_cli.run_path)
     run_dirname = os.path.dirname(fp)
     run_folder = os.path.basename(fp)
-    policy_resume_path = get_checkpoint_path(log_path=run_dirname, run_dir=run_folder,
-                                        other_dirs=["models"], checkpoint=chkpt)
+    policy_resume_path = get_checkpoint_path(
+        log_path=run_dirname, run_dir=run_folder, other_dirs=["models"], checkpoint=chkpt
+    )
 
     # Set playback directory to be in run folder
     playback_dir = os.path.join(args_cli.run_path, "playback")
@@ -140,13 +146,13 @@ if FROM_RUN: # Load paths for run folder
 else:
 
     task = args_cli.task
-    agent_entry_point = "rsl_rl_cfg_entry_point" # rsl is the only supported library for now
+    agent_entry_point = "rsl_rl_cfg_entry_point"  # rsl is the only supported library for now
     playback_dir = args_cli.log_dir
     policy_resume_path = args_cli.policy_path
 
 
 @hydra_task_config(task, agent_entry_point)
-def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config support
+def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg):  # TODO: Add SB3 config support
 
     if agent_cfg is None:
         agent_cfg = run_agent_cfg
@@ -165,21 +171,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
         video_kwargs = {
             "video_folder": playback_dir,
             "step_trigger": lambda step: step % args_cli.steps == 0,
-            "video_length": args_cli.steps, # updated to use args_cli
+            "video_length": args_cli.steps,  # updated to use args_cli
             "disable_logger": True,
             "name_prefix": args_cli.play_name,
         }
         print(f"[INFO] Recording video of playback to: {playback_dir}")
         env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
-
     ############################################
     ########### BEGIN PLAYBACK SETUP ###########
     ############################################
 
-    env.action_space.low = -1.
-    env.action_space.high = 1.
-    env = ClipAction(env) 
+    env.action_space.low = -1.0
+    env.action_space.high = 1.0
+    env = ClipAction(env)
     env = RslRlVecEnvWrapper(env)
 
     ppo_runner = OnPolicyRunner(env, agent_cfg.to_dict())
@@ -190,50 +195,67 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
 
     # Data storage
     data = {
-        'observations': [],
-        'rewards': [],
-        'actions': [],
-        'pos_xy': [],
-        'vel_x': [],
-        'vel_y': [],
-        'yaw_rate': [],
-        'theta': [],
-        's_idx': [],
-        'time': [],
-        's_idx_max': []
+        "observations": [],
+        "rewards": [],
+        "actions": [],
+        "pos_xy": [],
+        "vel_x": [],
+        "vel_y": [],
+        "yaw_rate": [],
+        "theta": [],
+        "s_idx": [],
+        "time": [],
+        "s_idx_max": [],
     }
 
     ### PLAY POLICY ###
 
     # reset environment
     obs, _ = env.get_observations()
-        
+
     real_data = pd.read_csv(REAL_DATA_PATH)
 
     from wheeledlab_tasks.config_loader import load_config
+
     CONFIG = load_config()
 
-    # Override environment parameters to compare data
-
-
-
+    # Prepare command streams from real data
     if args_cli.steps > len(real_data):
-        cmd_steering = torch.zeros(args_cli.steps+1, device=env.unwrapped.device)
-        cmd_velocity = torch.zeros(args_cli.steps+1, device=env.unwrapped.device)
-        time_data = torch.zeros(args_cli.steps+1, device=env.unwrapped.device)
-        cmd_steering[:len(real_data["cmd_steering_angle"])] = torch.tensor(real_data["cmd_steering_angle"].values)
-        cmd_velocity[:len(real_data["cmd_velocity"])] = torch.tensor(real_data["cmd_velocity"].values)
-        time_data[:len(real_data["time"])] = torch.tensor(real_data["time"].values)
+        cmd_steering = torch.zeros(args_cli.steps + 1, device=env.unwrapped.device)
+        cmd_velocity = torch.zeros(args_cli.steps + 1, device=env.unwrapped.device)
+        time_data = torch.zeros(args_cli.steps + 1, device=env.unwrapped.device)
+        cmd_steering[: len(real_data["cmd_steering_angle"])] = torch.tensor(
+            real_data["cmd_steering_angle"].values
+        )
+        cmd_velocity[: len(real_data["cmd_velocity"])] = torch.tensor(real_data["cmd_velocity"].values)
+        time_data[: len(real_data["time"])] = torch.tensor(real_data["time"].values)
     else:
-        cmd_steering = torch.tensor(real_data["cmd_steering_angle"].values)
-        cmd_velocity = torch.tensor(real_data["cmd_velocity"].values)
-        time_data = torch.tensor(real_data["time"].values)
+        cmd_steering = torch.tensor(real_data["cmd_steering_angle"].values, device=env.unwrapped.device)
+        cmd_velocity = torch.tensor(real_data["cmd_velocity"].values, device=env.unwrapped.device)
+        time_data = torch.tensor(real_data["time"].values, device=env.unwrapped.device)
 
     # Create new time points at fixed interval dt
-    dt = env.cfg.sim.dt*env.cfg.decimation  # your desired time interval
-    new_time = torch.arange(time_data.min(), time_data.max(), dt)
+    dt = env.cfg.sim.dt * env.cfg.decimation  # your desired time interval
+    new_time = torch.arange(time_data.min(), time_data.max(), dt, device=env.unwrapped.device)
 
-    # Resample both time series
+    # Resample both time series (Torch version for speed on GPU/CPU tensors)
+    cmd_steering_resampled = None
+    cmd_velocity_resampled = None
+
+    def resample_time_series(original_time, original_values, new_time):
+        """
+        Resample time series data using linear interpolation (torch).
+        """
+        # Find indices where new_time would be inserted to maintain order in original_time
+        indices = torch.searchsorted(original_time, new_time)
+        indices = torch.clamp(indices, 1, len(original_time) - 1)
+        t0 = original_time[indices - 1]
+        t1 = original_time[indices]
+        v0 = original_values[indices - 1]
+        v1 = original_values[indices]
+        alpha = (new_time - t0) / (t1 - t0)
+        return v0 + alpha * (v1 - v0)
+
     cmd_steering_resampled = resample_time_series(time_data, cmd_steering, new_time)
     cmd_velocity_resampled = resample_time_series(time_data, cmd_velocity, new_time)
 
@@ -242,30 +264,33 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
         # run everything in inference mode
         with torch.inference_mode():
             actions = policy(obs)
-            actions[:,0] = cmd_velocity_resampled[time_idx+1]/CONFIG['env_config']['MAX_SPEED_SCALING']
-            actions[:,1] = cmd_steering_resampled[time_idx+1]/CONFIG['env_config']['MAX_STEERING_SCALING']
+            actions[:, 0] = cmd_velocity_resampled[time_idx + 1] / CONFIG["env_config"]["MAX_SPEED_SCALING"]
+            actions[:, 1] = cmd_steering_resampled[time_idx + 1] / CONFIG["env_config"]["MAX_STEERING_SCALING"]
             # env stepping
             obs, rew, _, extras = env.step(actions)
-            
+
         # save data
-        data['observations'].append(obs)
-        data['rewards'].append(rew)
-        data['actions'].append(actions)
-        
+        data["observations"].append(obs)
+        data["rewards"].append(rew)
+        data["actions"].append(actions)
+
         fields = [
-            'pos_xy', 'theta',
-            'vel_x', 'vel_y', 'yaw_rate',
-            's_idx', 's_idx_max',
-            'time',
+            "pos_xy",
+            "theta",
+            "vel_x",
+            "vel_y",
+            "yaw_rate",
+            "s_idx",
+            "s_idx_max",
+            "time",
         ]
         for field in fields:
             value = extras.get(field)
             if value is not None:
                 data[field].append(value)
             else:
-                print(f'WARNING: could not store {field}')
+                print(f"WARNING: could not store {field}")
     ###
-
 
     ########################
     ###### SAVE DATA #######
@@ -278,7 +303,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
 
         # Base filename without extension
         base_name = os.path.join(save_folder, f"{args_cli.save_name}")
-        
+
         # Check if file exists and find appropriate suffix
         suffix = ""
         counter = 0
@@ -295,7 +320,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
             try:
                 data[key] = torch.stack(data[key], dim=0)
             except Exception as e:
-                print(f'WARNING: could not torch.stack {key} ({e})')
+                print(f"WARNING: could not torch.stack {key} ({e})")
                 continue
 
         torch.save(data, save_pt_path)
@@ -332,13 +357,55 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
             df_dict[k] = df_dict[k][:min_len]
 
         # Column order and renaming
-        col_order = ["time", "x", "y", "speed_cmd", "steering_cmd", "theta", "vel_x", "vel_y", "yaw_rate", "s_idx"]
+        col_order = [
+            "time",
+            "x",
+            "y",
+            "speed_cmd",
+            "steering_cmd",
+            "theta",
+            "vel_x",
+            "vel_y",
+            "yaw_rate",
+            "s_idx",
+        ]
         df = pd.DataFrame(df_dict)[col_order]
         df.columns = ["time", "x", "y", "speed_cmd", "steering_cmd", "theta_rad", "vx_mps", "vy_mps", "psi_radps", "s_idx"]
 
-        df.to_csv(save_csv_path, index=False)
-        print(f"[INFO] Saved selected episode data to: {save_csv_path}")
+        # --------------------- NEW: add REAL data resampled to SIM time --------------------- #
+        # Load and normalize real data time to start at 0
+        real_df_full = pd.read_csv(REAL_DATA_PATH).copy()
+        real_df_full["time"] = real_df_full["time"] - real_df_full["time"].iloc[0]
 
+        # Sim time base we will align to
+        t_sim = df["time"].to_numpy()
+
+        # Base mappings (only added if present in real CSV)
+        base_mappings = [
+            ("x", "real_x_m"),
+            ("y", "real_y_m"),
+            ("vx", "real_vx_mps"),
+            ("vy", "real_vy_mps"),
+            ("theta", "real_theta_rad"),
+            ("cmd_velocity", "real_speed_cmd"),
+            ("cmd_steering_angle", "real_steering_cmd"),
+        ]
+        # Yaw-rate column name candidates
+        yaw_rate_candidates = ["yaw_rate", "omega", "wz", "psi_radps", "omega_z"]
+        for cand in yaw_rate_candidates:
+            if cand in real_df_full.columns:
+                base_mappings.append((cand, "real_psi_radps"))
+                break
+
+        # Perform resampling for each available real column
+        for src_col, dst_col in base_mappings:
+            if src_col in real_df_full.columns:
+                df[dst_col] = resample_1d(real_df_full["time"].to_numpy(), real_df_full[src_col].to_numpy(), t_sim)
+
+        # ----------------------------------------------------------------------------------- #
+
+        df.to_csv(save_csv_path, index=False)
+        print(f"[INFO] Saved selected episode data (with resampled real data) to: {save_csv_path}")
 
     print("Done playing policy. Closing environment.")
     env.close()

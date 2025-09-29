@@ -26,7 +26,7 @@ class LogConfig:
     test_mode: bool = False                             # Test mode (disable logging, wandb, video, checkpoints). Overrides other flags
     model_save_dirname: str = "models"                  # Path to save the model under log_dir
     video_resolution: tuple[int, int] = (1280, 720)     # Resolution of the recorded video, Width x Height
-    video_crf: int = 18                                 # Constant Rate Factor for video compression
+    video_crf: int = 25                                 # Constant Rate Factor for video compression
     run_name: str = f"run-{random.randint(0, 1e7)}"     # Name of the run
 
     @property
@@ -46,8 +46,8 @@ class TrainConfig:
     device: str = "cuda:0"              # Device to use
     load_run: Optional[str] = None    # Load a previously trained model
     load_run_checkpoint: int = 0        # Load a specific checkpoint from a previously trained model
-    # load_run: Optional[str] = "GENERALIZE_TT_20hz_nbuffer10_nhorizon30delta5_genfric_genmass_normobs_v4"      # Load a previously trained model
-    # load_run_checkpoint: int = 950       # Load a
+    # load_run: Optional[str] = "OVERTAKE_ITA_MT_fast_mincurv"      # Load a previously trained model
+    # load_run_checkpoint: int = 500       # Load a
     
     log: LogConfig = LogConfig()
 

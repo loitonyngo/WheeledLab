@@ -26,11 +26,11 @@ F1TENTH_4WD_ACTUATOR_CFG = {
         effort_limit=0.45, # Adjusted for the 3s VXL-3s motor/ESC
         velocity_limit=400.0,  # Reduced speed compared to a 4s system
         stiffness=0.0,
-        damping=1100.0,
+        damping=1000.0,
         friction=0.00,
         min_delay=CONFIG['env_config']['MIN_DELAY_THROTTLE'],  # Delays depends on physics step size! e.g. if physics step is 0.025s and max_delay is 2, then the delay is 0.2s.
         max_delay=CONFIG['env_config']['MAX_DELAY_THROTTLE'], # 8-12  for dt= 0.025/4, 
-        low_velocity_threshold= 35.0,
+        low_velocity_threshold= 40.0,
         low_velocity_effort_limit= 0.13, 
     ),
 }

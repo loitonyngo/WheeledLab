@@ -17,3 +17,9 @@ source/wheeledlab_rl/logs_play_policy/
 source/wheeledlab_rl/logs_play_policy/
 
 
+*.pt
+*.csv
+*.png
+*.json
+*.bag
+*.usd

@@ -139,7 +139,7 @@ def base_lin_acc_x_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = Sce
     )
 
     # --- normalize ---
-    return env._base_lin_acc_x_history / norm
+    return env._base_lin_acc_x_history 
 
 def target_velocity_history(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), mean_noise = 0, std_noise = 0) -> torch.Tensor:
     # extract the used quantities (to enable type-hinting)

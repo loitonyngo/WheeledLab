@@ -103,6 +103,35 @@ def wall_collision(env):
 
     return  env._wall_collision_history[:, CONFIG['env_config']['WALL_COLLISION_CHECK_IDX']].bool()
 
+
+def side_slip(env, min_vel_x: float = 2.5, slip_thresh: float = 0.14, max_slip_angle: float = 0.5):
+    """
+    Compute a side slip penalty for the robot car, linearly growing between 
+    slip_thresh and max_slip_angle, saturating beyond max_slip_angle.
+
+    Args:
+        env: Environment containing the robot.
+        min_vel_x: Minimum forward velocity for penalty to apply.
+        slip_thresh: Slip angle threshold (radians) below which no penalty is applied.
+        max_slip_angle: Maximum slip angle (radians) for saturation.
+
+    Returns:
+        torch.Tensor: Penalty proportional to slip angle above the threshold.
+    """
+    # Get robot linear velocity in world frame
+    vel = mdp.base_lin_vel(env)  # shape: [num_envs, 2]
+
+    # Compute side slip angle (radians)
+    slip_angle = torch.abs(torch.atan2(vel[..., 1], vel[..., 0]))
+
+    # Mask for environments moving fast enough
+    moving_mask = torch.abs(vel[..., 0]) >= min_vel_x
+
+    # Compute raw penalty above threshold
+    side_slip = (slip_angle > slip_thresh) & moving_mask
+
+    return side_slip.bool()   
+ 
 # def opponent_collision(env):
 #     num_episodes = env.common_step_counter // env.max_episode_length
 #     if num_episodes <  CONFIG['env_config']['IGNORE_OPPONENT_UNTIL_EP']:

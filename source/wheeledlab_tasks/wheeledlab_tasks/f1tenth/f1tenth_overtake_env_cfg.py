@@ -525,7 +525,7 @@ class F1TenthOvertakeRewardsCfg:
     # Standard reward for progressing along centerline, weight=1
     progress_rew = RewTerm(
         func=progress_rew,
-        weight=1.0,
+        weight=1,
     )
     # average_vel = RewTerm(
     #     func=average_vel,
@@ -534,7 +534,7 @@ class F1TenthOvertakeRewardsCfg:
         
     wall_collision_penalty = RewTerm(
         func=wall_collision_penalty,
-        weight=0.5,
+        weight=2.5,
     )
 
     soft_wall_collision_penalty = RewTerm(
@@ -544,20 +544,15 @@ class F1TenthOvertakeRewardsCfg:
 
     side_slip_penalty = RewTerm(
         func=side_slip_penalty,
-        weight=0.5,
+        weight=1,
         params={
-            "slip_thresh": 0.14,
+            "slip_thresh": 0.18,
         }
     )
 
-    delta_target_velocity_penalty = RewTerm(
-        func=delta_target_velocity_penalty,
-        weight=0.5,
-    )
-    
     opponent_collision_penalty = RewTerm(
         func=opponent_collision_penalty,
-        weight=0.5,
+        weight=10,
     )
 
     opponent_overtake_completed_reward = RewTerm(
@@ -567,12 +562,12 @@ class F1TenthOvertakeRewardsCfg:
     
     opponent_overtake_distance_reward = RewTerm(
         func=opponent_overtake_distance_reward,
-        weight=0.0,
+        weight=0.001,
     )
 
     opponent_overtake_delta_distance_reward = RewTerm(
         func=opponent_overtake_delta_distance_reward,
-        weight=0.5,
+        weight=0.01,
     )
 
     # opponent_mean_delta_speed = RewTerm(
@@ -585,15 +580,17 @@ class F1TenthOvertakeRewardsCfg:
     #     weight=0.1,
     # )
 
-    delta_target_velocity_penalty = RewTerm(
-        func=delta_target_velocity_penalty,
-        weight=1,
-    )
     # soft_wall_collision_penalty = RewTerm(
     #     func=soft_wall_collision_penalty,
     #     weight=0.5,
     # )
 
+    delta_target_velocity_penalty = RewTerm(
+        func=delta_target_velocity_penalty,
+        weight=0.5,
+    )
+    
+    
     var_throttle_penalty =  RewTerm(
         func=var_throttle_penalty,
         weight=0.001,
@@ -601,7 +598,7 @@ class F1TenthOvertakeRewardsCfg:
 
     var_steering_penalty =  RewTerm(
         func=var_steering_penalty,
-        weight=0.01,
+        weight=0.04,
     )
 
     # effort_throttle_penalty =  RewTerm(
@@ -611,16 +608,16 @@ class F1TenthOvertakeRewardsCfg:
     
     effort_steering_penalty =  RewTerm(
         func=effort_steering_penalty,
-        weight=0.02,
+        weight=0.1,
     )
 
     effort_abs_steering_penalty =  RewTerm(
         func=effort_target_steering_angle_penalty,
-        weight=0.01,
+        weight=0.25,
     )
     delta_steering_l2_penalty =  RewTerm(
         func=delta_steering_l2_penalty,
-        weight=0.025,
+        weight=0.5,
     )
     
     # delta_speed_cmd_penalty =  RewTerm(
@@ -780,7 +777,7 @@ class F1TenthOvertakeTerminationsCfg:
 class F1TenthOvertakeRLEnvCfg(ManagerBasedRLEnvCfg):
 
     # These will be overwritten by the rss_cfgs
-    seed: int = 42
+    seed: int = CONFIG['env_config']['RANDOM_SEED']
     num_envs: int = 1
     env_spacing: int = 0
 
@@ -1066,6 +1063,7 @@ class F1TenthOvertakeEnv(ManagerBasedEnv):
             device=self.device
         )
 
+        
         self._opponent_s_history = torch.zeros(
             (self.num_envs, self._obs_history_length), 
             dtype=torch.float32,
@@ -1077,7 +1075,13 @@ class F1TenthOvertakeEnv(ManagerBasedEnv):
             dtype=torch.float32,
             device=self.device
         )
-                
+
+        self._opponent_xy_position = torch.zeros(
+            (self.num_envs, 2), 
+            dtype=torch.float32,
+            device=self.device
+        )
+        
         self._s_idx_diff_history = torch.zeros(
             (self.num_envs, self._obs_history_length), 
             dtype=torch.float32,

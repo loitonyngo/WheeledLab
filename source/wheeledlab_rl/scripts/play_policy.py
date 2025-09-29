@@ -37,8 +37,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_LOGS_PATH = PROJECT_ROOT / "wheeledlab_rl" / "logs"
 SAVE_DIR = PROJECT_ROOT / "wheeledlab_rl" / "output_play_policy"
 
-POLICY = "CIR1_TT_20hz_vel12steer15fric75_nhor20ds10_del2505_buffer5_wall20_pendeltasteeringvariation"
-SAVE_NAME = "test_1"
+POLICY = "OVERTAKE_ITA_MT_fast_mincurv"
+SAVE_NAME = "OVERTAKE_ITA_MT_results"
 TIMESTAMP = datetime.now().strftime("%m%d_%H%M")
 
 ###################################
@@ -56,7 +56,7 @@ parser.add_argument("--task", type=str, default=None, help="Task name. Overrides
 parser.add_argument("--policy-path", type=str, default=None, help="Path to policy file.")
 
 # Playback
-parser.add_argument("--steps", type=int, default=250, help="Length of recorded video in steps")
+parser.add_argument("--steps", type=int, default=200, help="Length of recorded video in steps")
 # Logging
 parser.add_argument('-sd', "--save-data", action="store_true", default=True, help="Save episode data")
 parser.add_argument("--save-name", type=str, default=SAVE_NAME, help="Name save file.")
@@ -180,7 +180,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
         's_idx': [],
         'time': [],
         's_idx_max': [],
-        'delta_s_opp_ego': []
+        'delta_s_opp_ego': [],
+        'opp_pos_xy': [],
+        'opp_speed': []
     }
 
     ### PLAY POLICY ###
@@ -207,10 +209,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
             'pos_xy', 'theta',
             'vel_x', 'vel_y', 'yaw_rate',
             'target_velocity', 'target_steering',
-            's_idx', 's_idx_max',
+            's_idx', 's_idx_max', 'opp_pos_xy', 'opp_speed',
             'time',
         ]
         
+        # print(data['opp_pos_xy'])
         for field in fields:
             value = extras.get(field)
             if value is not None:
@@ -218,7 +221,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
             else:
                 print(f'WARNING: could not store {field}')
     ###
-
 
     ########################
     ###### SAVE DATA #######
@@ -255,7 +257,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
         print(f"[INFO] Saved episode data to: {save_pt_path}")
 
         # --- Save selected fields as .csv ---
-        selected_fields = ["target_velocity", 'target_steering', "pos_xy", "theta", "vel_x", "vel_y", "yaw_rate", "s_idx", "time"]
+        selected_fields = ["target_velocity", 'target_steering', "pos_xy", "theta", "vel_x", "vel_y", "yaw_rate", "s_idx", "time", 'opp_pos_xy', 'opp_speed']
 
         df_dict = {}
         lengths = []
@@ -271,6 +273,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
                 df_dict["x"] = tensor[:, 0].numpy().astype(float)
                 df_dict["y"] = tensor[:, 1].numpy().astype(float)
                 lengths.append(tensor.shape[0])
+            elif key == "opp_pos_xy":
+                df_dict["opp_x"] = tensor[:, 0].numpy().astype(float)
+                df_dict["opp_y"] = tensor[:, 1].numpy().astype(float)
             else:
                 arr = tensor.numpy().astype(float)
                 df_dict[key] = arr
@@ -282,9 +287,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
             df_dict[k] = df_dict[k][:min_len]
 
         # Column order and renaming
-        col_order = ["time", "x", "y", "target_velocity", "target_steering", "theta", "vel_x", "vel_y", "yaw_rate", "s_idx"]
+        col_order = ["time", "x", "y", "target_velocity", "target_steering", "theta", "vel_x", "vel_y", "yaw_rate", "s_idx", "opp_x", "opp_y", "opp_speed"]
         df = pd.DataFrame(df_dict)[col_order]
-        df.columns = ["time", "x", "y", "speed_cmd", "steering_cmd", "theta_rad", "vx_mps", "vy_mps", "psi_radps", "s_idx"]
+        df.columns = ["time", "x", "y", "cmd_velocity", "cmd_steering_angle", "theta", "vx", "vy", "omega", "s_idx", "opp_x", "opp_y", "opp_v"]
 
         df.to_csv(save_csv_path, index=False)
         print(f"[INFO] Saved selected episode data to: {save_csv_path}")
@@ -308,15 +313,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     # --------------------------
     actions      = sim_data.filter(like="actions").to_numpy()       # e.g., actions_0, actions_1...
     pos_xy       = sim_data[['x', 'y']].to_numpy()
-    vel_x        = sim_data['vx_mps'].to_numpy()
-    vel_y        = sim_data['vy_mps'].to_numpy()
-    yaw_rate     = sim_data['psi_radps'].to_numpy()
+    vel_x        = sim_data['vx'].to_numpy()
+    vel_y        = sim_data['vy'].to_numpy()
+    yaw_rate     = sim_data['omega'].to_numpy()
     s_idx        = sim_data['s_idx'].to_numpy()
-    theta        = sim_data['theta_rad'].to_numpy()
+    theta        = sim_data['theta'].to_numpy()
     time         = sim_data['time'].to_numpy()
-    speed_cmd    = sim_data['speed_cmd'].to_numpy()
-    steering_cmd = sim_data['steering_cmd'].to_numpy()
-
+    speed_cmd    = sim_data['cmd_velocity'].to_numpy()
+    steering_cmd = sim_data['cmd_steering_angle'].to_numpy()
+    opp_xy = sim_data[['opp_x', 'opp_y']].to_numpy()
+    opp_v  = sim_data['opp_v'].to_numpy()
 
     # --------------------------
     # Compute derived quantities
@@ -409,22 +415,113 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg): # TODO: Add SB3 config suppo
     ax3.grid(True)
 
 
+    # ---- Subplot 4: Slip Angle ----
+    ax4 = plt.subplot(4,1,4, sharex=ax1)
 
+    # Compute slip angle in radians
+    slip_angle = np.arctan2(vel_y, vel_x)  # arctan2(vy, vx) handles vx=0 properly
+
+    ax4.plot(time, slip_angle, color='magenta', label='Slip Angle β')
+
+    ax4.set_ylabel("Slip Angle [rad]")
+    ax4.set_xlabel("Time [s]")
+    ax4.legend(loc='upper right')
+    ax4.grid(True)
+    ax4.set_title("Vehicle Slip Angle vs Time")
+    
+    plt.figure(figsize=(12, 8))
+    
+    # ---- Subplot 1: Velocity Command vs Actual ----
+    ax1 = plt.subplot(2, 1, 1)
+
+    # Command velocity
+    ax1.plot(time,
+            speed_cmd ,
+            color='green', label='Sim cmd velocity')
+
+    # Actual velocity (vx)
+    ax1.plot(time, vel_x,
+            color='blue', label='Sim vx')
+
+    ax1.set_ylabel("Velocity [m/s]")
+    ax1.set_title("Velocity Command vs Actual Velocity (X-direction)")
+    ax1.legend()
+    ax1.grid(True)
+
+    # ---- Subplot 2: Steering Command vs Yaw Rate ----
+    ax2 = plt.subplot(2, 1, 2)
+
+    # Steering command (scaled)
+    ax2.plot(time,
+            steering_cmd,
+            color='red', label='Sim cmd steering')
+
+    # Yaw rate (ω)
+    ax2b = ax2.twinx()
+    ax2b.plot(time, yaw_rate,
+            color='purple', label='Sim ω')
+
+
+    # Axis labels & ranges
+    ax2.set_ylabel("Steering Angle [rad]", color='red')
+    ax2.set_ylim(-0.5, 0.5)
+    ax2.tick_params(axis='y', labelcolor='red')
+
+    ax2b.set_ylabel("Yaw Rate ω [rad/s]", color='purple')
+    ax2b.set_ylim(-3, 3)
+    ax2b.tick_params(axis='y', labelcolor='purple')
+
+    ax2.set_title("Steering Command vs Yaw Rate")
+
+    # Legends combined
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    lines2b, labels2b = ax2b.get_legend_handles_labels()
+    ax2.legend(lines2 + lines2b, labels2 + labels2b, loc="upper right")
+
+    ax2.grid(True)
+
+    plt.xlabel("Time [s]")
+    plt.tight_layout()
+    plt.show()
+    
     # --------------------------
     # Plot trajectories
     # --------------------------
-    plt.figure(figsize=(10, 8))
-    plt.plot(pos_xy[:,0], pos_xy[:,1], label='Simulated Trajectory', color='blue', linewidth=2)
+    # plt.figure(figsize=(10, 8))
+    # plt.plot(pos_xy[:,0], pos_xy[:,1], label='Simulated Trajectory', color='blue', linewidth=2)
 
-    plt.xlabel("X Position [m]")
-    plt.ylabel("Y Position [m]")
-    plt.title("Trajectory Comparison: Simulated vs Real")
-    plt.legend()
-    plt.axis('equal')  # keep aspect ratio correct
-    plt.grid(True)
+    # plt.xlabel("X Position [m]")
+    # plt.ylabel("Y Position [m]")
+    # plt.title("Trajectory Comparison: Simulated vs Real")
+    # plt.legend()
+    # plt.axis('equal')  # keep aspect ratio correct
+    # plt.grid(True)
+    # plt.show()
+
+    plt.figure(figsize=(10, 8))
+    plt.scatter(pos_xy[:, 0], pos_xy[:, 1], label='Ego trajectory', linewidth=2)
+    plt.scatter(opp_xy[:, 0], opp_xy[:, 1], label='Opponent trajectory', linewidth=2)
+    plt.xlabel("X [m]"); plt.ylabel("Y [m]")
+    plt.title("Trajectories: Ego vs Opponent")
+    plt.legend(); plt.axis('equal'); plt.grid(True)
     plt.show()
 
+    # Ensure same length already handled earlier by your min_len trimming
+    sep = np.linalg.norm(pos_xy - opp_xy, axis=1)
+    plt.figure(figsize=(10, 4))
+    plt.plot(time, sep)
+    plt.xlabel("Time [s]"); plt.ylabel("Separation [m]")
+    plt.title("Ego–Opponent Separation vs Time")
+    plt.grid(True); plt.tight_layout()
+    plt.show()
 
+    delta_v = vel_x - opp_v
+    plt.figure(figsize=(10, 4))
+    plt.plot(time, delta_v)
+    plt.xlabel("Time [s]"); plt.ylabel("delta v [m/s]")
+    plt.title("Ego–Opponent Separation vs Delta v")
+    plt.grid(True); plt.tight_layout()
+    plt.show()
 def resample_time_series(original_time, original_values, new_time):
     """
     Resample time series data using linear interpolation.
@@ -501,84 +598,3 @@ def resample_timeseries(original_time, original_values, new_time):
 if __name__ == "__main__":
     main()
 
-
-
-        # Plot actions
-
-    # plt.figure(figsize=(12, 4))
-    # for env_idx in range(actions.shape[1]):  # Loop through environments
-    #     plt.plot(time[start_idx:end_idx], actions[start_idx:end_idx, env_idx, 0], label=f'Env {env_idx} (Throttle)')
-    #     plt.plot(time[start_idx:end_idx], actions[start_idx:end_idx, env_idx, 1], '--', label=f'Env {env_idx} (Steering)')
-    #     # plt.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 5], '--', label=f'Env {env_idx} (ang vel y)')
-    # plt.xlabel("time [s]")
-    # plt.ylabel("Action Value")
-    # plt.title(POLICY+": Policy Actions Over Time")
-    # plt.legend()
-    # plt.grid()
-    # plt.show()
-    # vel = np.sqrt(np.square(observations[:, 0, 0]) + np.square(observations[:, 0, 1]))
-
-
-    # plt.figure(figsize=(15, 10))
-
-    # Create subplots (2 rows, 1 column)
-    # ax1 = plt.subplot(2, 1, 1)  # Velocity plot
-    # ax2 = plt.subplot(2, 1, 2)  # Slip ratio plot
-
-    # Calculate metrics
-    # wheel_ang_vel_mean = np.mean(observations[:, 0, 5:9], axis=1)
-    # wheel_lin_vel_mean = np.mean(observations[:, 0, 9:13], axis=1)
-    # slip_ratio = (wheel_ang_vel_mean*0.06/wheel_lin_vel_mean-1)
-
-    # Plot 1: Velocities
-    # for env_idx in range(actions.shape[1]):
-        # Angular velocities (converted to linear by multiplying with radius)
-        # ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 5]*0.06, '--', color='red', alpha=0.5, label='BL ang_vel×r' if env_idx==0 else "")
-        # ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 6]*0.06, '--', color='orange', alpha=0.5, label='BR ang_vel×r' if env_idx==0 else "")
-        # ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 7]*0.06, '--', color='blue', alpha=0.5, label='FL ang_vel×r' if env_idx==0 else "")
-        # ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 8]*0.06, '--', color='cyan', alpha=0.5, label='FR ang_vel×r' if env_idx==0 else "")
-        
-    #     # Linear velocities
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 9], color='red', alpha=0.5, label='BL lin_vel' if env_idx==0 else "")
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 10], color='orange', alpha=0.5, label='BR lin_vel' if env_idx==0 else "")
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 11], color='blue', alpha=0.5, label='FL lin_vel' if env_idx==0 else "")
-    #     ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 12], color='cyan', alpha=0.5, label='FR lin_vel' if env_idx==0 else "")
-
-    # # Plot mean values
-
-    # ax1.plot(time[start_idx:end_idx], wheel_ang_vel_mean[start_idx:end_idx]*0.06, '--', color='black', label='Mean ang_vel×r')
-    # ax1.plot(time[start_idx:end_idx], observations[start_idx:end_idx, env_idx, 13]*0.06, '--', color='red', marker='x', label='Mean ang_speed×r')
-
-    # ax1.plot(time[start_idx:end_idx], wheel_lin_vel_mean[start_idx:end_idx], color='blue', marker='x', label='Mean lin_vel')
-    # ax1.plot(time[start_idx:end_idx], vel[start_idx:end_idx], color='purple', label='Base speed')
-
-    # ax1.set_ylabel('Velocity (m/s)')
-    # ax1.set_title('Wheel Velocities')
-    # ax1.legend()
-    # ax1.grid(True)
-
-    # Plot 2: Slip Ratio
-    # for env_idx in range(actions.shape[1]):
-        # Individual wheel slip ratios
-        # wheel_slip_BL = (observations[start_idx:end_idx, env_idx, 5]*0.06/observations[start_idx:end_idx, env_idx, 9])-1
-        # wheel_slip_BR = (observations[start_idx:end_idx, env_idx, 6]*0.06/observations[start_idx:end_idx, env_idx, 10])-1
-        # wheel_slip_FL = (observations[start_idx:end_idx, env_idx, 7]*0.06/observations[start_idx:end_idx, env_idx, 11])-1
-        # wheel_slip_FR = (observations[start_idx:end_idx, env_idx, 8]*0.06/observations[start_idx:end_idx, env_idx, 12])-1
-        
-        # ax2.plot(time[start_idx:end_idx], wheel_slip_BL, color='red', alpha=0.5, label='BL slip' if env_idx==0 else "")
-        # ax2.plot(time[start_idx:end_idx], wheel_slip_BR, color='orange', alpha=0.5, label='BR slip' if env_idx==0 else "")
-        # ax2.plot(time[start_idx:end_idx], wheel_slip_FL, color='blue', alpha=0.5, label='FL slip' if env_idx==0 else "")
-        # ax2.plot(time[start_idx:end_idx], wheel_slip_FR, color='cyan', alpha=0.5, label='FR slip' if env_idx==0 else "")
-
-    # Mean slip ratio
-    # ax2.plot(time[start_idx:end_idx], slip_ratio[start_idx:end_idx], color='black', label='Mean slip ratio')
-    # ax2.axhline(0, color='gray', linestyle='--')  # Reference line at zero slip
-
-    # ax2.set_xlabel('Time (s)')
-    # ax2.set_ylabel('Slip Ratio')
-    # ax2.set_title('Wheel Slip Ratios')
-    # ax2.legend()
-    # ax2.grid(True)
-
-    # plt.tight_layout()
-    # plt.show()

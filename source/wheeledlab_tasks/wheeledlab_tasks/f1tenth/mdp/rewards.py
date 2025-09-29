@@ -360,7 +360,8 @@ def opponent_overtake_delta_distance_reward(env):
         -delta_delta_s_opp_ego,  # Positive reward for increasing lead (since delta_s_opp_ego becomes more negative)
         delta_delta_s_opp_ego  # Original reward for closing gap
     )
-    
+
+
     return torch.where(no_off_track & no_opp_collision, reward*CONFIG['env_config']['LEN_S_IDX'], 0)
 
 def opponent_overtake_distance_reward(env):
@@ -573,6 +574,8 @@ def opponent_overtake_completed_reward(env):
     env.extras['log']['Info/opponent_overtaken_collision_ratio_step'] = torch.sum(overtake_completed.float())/(torch.sum(env._opponent_collision_history[:, CONFIG['env_config']['OPPONENT_COLLISION_CHECK_IDX']])+torch.sum(overtake_completed.float())+torch.sum(env._wall_collision_history[:, CONFIG['env_config']['WALL_COLLISION_CHECK_IDX']].float())+1)
 
     env.extras['delta_s_opp_ego'] = delta_s_opp_ego[0]
+    env.extras['opp_pos_xy'] = opp_position_xy
+    env.extras['opp_speed'] = env._opponent_speed[:]
     
     return overtake_completed.float()*env._opponent_vel_scaling
 
@@ -758,6 +761,8 @@ def progress_waypoint_bool(env):
     
     # Get current positions and map levels
     position_xy_world = mdp.root_pos_w(env)[..., :2]
+    # opp_position_xy = mdp.root_pos_w(env=env, asset_cfg=SceneEntityCfg("opponent"))[:, :2]
+
     if not hasattr(env, '_map_levels'):
         env._map_levels = torch.zeros(env.num_envs, 
                                 dtype=torch.long,
@@ -851,10 +856,17 @@ def progress_waypoint_bool(env):
         
     env._vel_y_calc =  mdp.base_lin_vel(env)[:, 1]*mdp.base_lin_vel(env)[:, 0]*1.2
     
+    if not hasattr(env, '_opponent_xy_position'):
+        env._opponent_xy_position = torch.zeros((env.num_envs,2), 
+                                        dtype=torch.float32,
+                                        device=env.device)    
+    if not hasattr(env, '_opponent_speed'):
+        env._opponent_speed = torch.zeros(env.num_envs, 
+                                    dtype=torch.float32,
+                                    device=env.device)       
+
     ###########################
     # Store extras (using first map's waypoints count for simplicity), only necessary when you play policy, find a better way to implement it
-    # env.extras['inner'] =  torch.tensor(env.scene.terrain.cfg.inner_list[map_level][current_idx], device=env.device)
-    # env.extras['outer'] = torch.tensor(env.scene.terrain.cfg.outer_list[map_level][current_idx], device=env.device)
     env.extras['theta'] = asset.data.heading_w
     env.extras['pos_xy'] = position_xy_world
     env.extras['vel_x'] = asset.data.root_lin_vel_b[:,0]
@@ -867,7 +879,6 @@ def progress_waypoint_bool(env):
     env.extras['s_idx'] = current_idx.clone()
     env.extras['time'] = torch.tensor(env.sim.current_time, device=env.device)
     env.extras['s_idx_max'] = torch.tensor(num_waypoints, device=env.device)
-    env.extras['throttle_joints_applied_effort'] = asset.actuators['throttle_joints'].applied_effort
     ###########################
     
     env.extras['vel_y_calc'] = env._vel_y_calc
@@ -885,6 +896,9 @@ def progress_waypoint_bool(env):
     env.extras['log']['Info/mean_speed'] = torch.mean(env._base_lin_vel_x_history)
     env.extras['log']['Info/max_speed'] = torch.max(env._base_lin_vel_x_history)
     env.extras['log']['Info/mean_delta_target_speed'] = torch.mean(torch.abs(env._target_steering_angle_history-env._base_lin_vel_x_history))
+
+    ##########
+    # env.extras['opp_pos_xy'] = opp_position_xy
 
     return progress_bool, progress
 
