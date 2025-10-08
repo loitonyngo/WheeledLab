@@ -1,80 +1,98 @@
 # config.yaml
 env_config:
+
+  # Map list (order matters)
   # MAP_NAME_LIST: ['AUT', 'BAH', 'SPA', 'BRA', 'DAY', 'JED', 'SPE_R', 'SPE', 'THETRACK', 'CTHETRACK_reverse_v0', 'icra25_v6', 'DCRL', 'CHN', 'TEST_1', 'GLC_smile_small', 'GLC_pit_rbring1', 'IND', 'SAU', 'SAU_R', 'OVA', 'OVA_R', 'IND_R', 'KEY', 'TR2', 'TR3', 'CRO_R', 'f', 'SPA', 'HOOK_v0','CTHETRACK_v1']
   MAP_NAME_LIST: ['CIR1']
 
   RANDOM_SEED: 43
+
+  # Not clean, but it works for now (every map has the same origin and this simplifies the resets of the cars position in new episodes)
   ORIGIN_LIST: [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]] 
   TRAJ_VISIBLE: False
   BOUNDARY_VISIBLE: True
   
-  # When comparing real data that don't use incremental it must always be set to False
+  # Incremental action space for speed and steering. When comparing real data that don't use incremental it must always be set to False
   INCREMENTAL_MODE: True 
 
-  # When comparing real data set to false, otherwise true
+  # End episode when car goes out of bounds. When comparing real data set to false, otherwise true. 
   NON_TRAVERSABLE_TERMINATION: True
+
+  # Reset car position at random. Otherwise, start at the beginning of the track
   RESET_RANDOM: True
 
   # Actutators limit
   MAX_SPEED_INCREMENT: 0.10 # m/s /dt_decimation
   MAX_STEERING_ANGLE_INCREMENT: 0.10 # rad /dt_decimation
-  MAX_SPEED_SCALING: 12
-  MAX_STEERING_ANGLE: 0.4
-  SPEED_SIM_TO_REAL_SCALING: 1.0 # due to wheel radius mismatch, scaling = 1 when radius 0.5, but then on real car velocity obs need to be scaled up so that policy is safer
-  STEERING_SIM_TO_REAL_SCALING: 1.0 # due to geometric model mismatch
+  MAX_SPEED_SCALING: 12 # max command velocity
+  MAX_STEERING_ANGLE: 0.4 # mas steering angle (0.35-0.4)
+
+  SPEED_SIM_TO_REAL_SCALING: 1.0 # dividers of actual commands
+  STEERING_SIM_TO_REAL_SCALING: 1.0 # 
 
   SPEED_OFFSET: 0
+  
+  # steering angle bias to absolute steering command
   STEERING_OFFSET: 0.04
-  # Keep false
-  VD_ENHANCED: False
 
-  RANDOMIZE_FRICTION: False
+  # Steering Delay in SIM_DT n steps
+  MIN_DELAY_STEERING: 30 # sim dt steps, e.g. 0.005*40 = 0.20s
+  MAX_DELAY_STEERING: 30
+
+  # Throttle Delay in SIM_DT n steps
+  MIN_DELAY_THROTTLE: 5  #sim dt steps
+  MAX_DELAY_THROTTLE: 5
+
+  # Friction Parameters and Domain Randomization
   DYNAMIC_FRICTION: 0.8
   STATIC_FRICTION: 0.8
+
+  # Friction Randomization
+  RANDOMIZE_FRICTION: False
   STD_FRICTION: 0.0
   NUM_BUCKETS_FRICTION: 30000
   RESTITUTION: 0.0
 
-  # increase weight to 1,1, friction 0,7
+  # Mass Randomization, scale from actual mass
   RANDOMIZE_BODY_MASS: False
   MIN_MASS_SCALE: 1.0
   MAX_MASS_SCALE: 1.0
+
+  # Actuator gain randomization, WIP
   RANDOMIZE_ACTUATOR_STEERING_GAIN: False
   RANDOMIZE_ACTUATOR_THROTTLE_GAIN: False
 
-  # SIM_DT: Physics simulation time step
-  # SIM_DECIMATION: Number of physics steps per simulation step; 
-  # The actions, observations, and rewards are computed every SIM_DECIMATION steps, and every SIM_DECIMATION*SIM_DT seconds.
+  # Max episode length in seconds before timeout
   EPISODE_LENGTH_S_TIMETRIAL: 10
   EPISODE_LENGTH_S_OVERTAKE: 30
+
+  # SIM_DT: Physics simulation time step
   SIM_DT: 0.005
+
+  # SIM_DECIMATION: Number of physics steps for action, obs and reward computation; 
+  # The actions, observations, and rewards are computed every SIM_DECIMATION steps, and every SIM_DECIMATION*SIM_DT seconds.
   SIM_DECIMATION: 5
-  # SIM_DT: 0.01
-  # SIM_DECIMATION: 8
 
-  LEN_S_IDX: 0.1 # DON'T CHANGE!
-  # SIM_DT: 0.003125
-
-  MIN_DELAY_STEERING: 30 # sim dt steps, e.g. 0.005*40 = 0.20s
-  MAX_DELAY_STEERING: 30
-
-  MIN_DELAY_THROTTLE: 5  #sim dt steps
-  MAX_DELAY_THROTTLE: 5
+  # Distance between waypoints in meters (Should never change)
+  LEN_S_IDX: 0.1 # 
 
 
+  # History Buffer lengths (in number of SIM_DECIMATION steps)
   ACTION_HISTORY_LENGTH: 10 # SIM_DT*SIM_DECIMATION*ACTION_HISTORY_LENGTH, e.g 0.005*10*5 = 0.25s
   OBS_HISTORY_LENGTH: 10
   REW_HISTORY_LENGTH: 100
 
   # Overtake is completed if for every step in REW_HISTORY_LENGTH the opponent is ahead by this idx
-  # Wall and Opponent collision is signaled after CHECK_IDX steps they actually happened
+  # Wall and Opponent collision is signaled after CHECK_IDX steps they actually happened, so before the actual collision happens and the episode terminates there is some time to explore more
   PROGRESS_HISTORY_CHECK_IDX: 3
   WALL_COLLISION_CHECK_IDX: 50
   OPPONENT_COLLISION_CHECK_IDX: 3
 
   # Min distance allowable to walls (otherwise collision)
   HARD_WALL_COLLISION_RADIUS: 0.18
+  # Min distance to walls for soft penalty
   SOFT_WALL_COLLISION_RADIUS: 0.25
+
   # Max progress allowable (in idx), otherwise we consider it corner cutting
   MAX_PROGRESS_IDX: 30 
 
@@ -86,32 +104,59 @@ env_config:
   T_HORIZON: 4 # [s]
 
 ############### OPPONENT OVERTAKE
+
+  # Opponent size
   OPP_SIZE_RADIUS: 0.20
+  # Opponent movement updated every OPP_MOVE_DT seconds
   OPP_MOVE_DT: 0.1
-  OPP_COLLISION_RADIUS: 0.40
+  # Opponent collision radii
   OPP_FRONT_COLLISION_RADIUS: 0.45
   OPP_LAT_COLLISION_RADIUS: 0.30
+  # see "cross_pos_opp_ego" in observations.py
   CROSS_POS_LIM: 0.15
 
+  # Opponent can have min_curv, shortest_path, or centerlien
   OPP_GENERALIZATION: True
+
+  # If not OPP_GENERALIZATION, specify the trajectory
   OPP_TRAJ: "min_curv"
+
+  # XY std shift of the trajectory
   OPPONENT_TRAJ_XY_SHIFT_MAX: 0.0
+  
+  # Opponent initial curriculum vel scaling
   OPP_INIT_VEL_SCALING: 0.001
+  # Opponent min velocity scaling
   OPP_MIN_VEL_SCALING: 0.001
+  # Opp scaling std from actual level
   OPP_STD_VEL_SCALING: 0.5
+
+  # Opponent scaling increase/decrease
   OPP_VEL_SCALING_INCREMENT: 0.025
   OPP_VEL_SCALING_DECREASE: 0.000
+  # Opponent Overtake/Collision ratio thresholds to level up or down
   OT_COLLISION_RATIO_LVL_UP: 0.51
   OT_COLLISION_RATIO_LVL_DOWN: 0.11
+  
+  # Check Overtake/Collision ratio every x Steps
   VEL_SCALING_CHECK_STEPS: 100
   
+  # Opponent stay still for x SIM_DT steps at the beginning of the episode, so that the ego car has time to accelerate
   OPPONENT_STARTS_MOVING_AFTER_STEP: 25
-  # OPPONENT_INIT_DISTANCE_IDX: 40
+  # Opponent initial distances
   OPPONENT_INIT_DISTANCE_IDX_MAX: 50
   OPPONENT_INIT_DISTANCE_IDX_MIN: 45
+
+  # Opponent considered far away when
   OPPONENT_FAR_AWAY_IDX: 100
+  
+  # Opponent considered overtaken when in front by x idx
   OPPONENT_OVERTAKEN_IDX: 10
+
+  # Opponent always ahead percentage
   OPPONENT_ALWAYS_AHEAD_PERCENTAGE: 0.01
 
+  # Number of episodes at beginning to ignore opponent (no collision)
   IGNORE_OPPONENT_UNTIL_EP: 0
+  # Number of episodes at beginning to have static opponent (no movement)
   STATIC_OPPONENT_UNTIL_EP: 0
