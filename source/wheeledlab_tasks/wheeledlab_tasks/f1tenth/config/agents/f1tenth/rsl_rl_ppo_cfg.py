@@ -4,7 +4,7 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 @configclass
 class F1TenthTimeTrialPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     # Training hyperparameters (adjust as needed)
-    num_steps_per_env = 32 # 16 for 4096, 32 for 2048, 64 for 1024
+    num_steps_per_env = 16 # 16 for 4096, 32 for 2048, 64 for 1024
     max_iterations = 1500
     save_interval = 50
     experiment_name = "ppo_f1tenth"
@@ -38,7 +38,7 @@ class F1TenthTimeTrialPPORunnerCfg(RslRlOnPolicyRunnerCfg):
 @configclass
 class F1TenthOvertakePPORunnerCfg(RslRlOnPolicyRunnerCfg):
     # Training hyperparameters (adjust as needed)
-    num_steps_per_env = 32
+    num_steps_per_env = 16
     max_iterations = 1500
     save_interval = 50
     experiment_name = "ppo_f1tenth"

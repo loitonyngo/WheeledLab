@@ -2,24 +2,24 @@
 env_config:
   # MAP_NAME_LIST: ['AUT', 'BAH', 'SPA', 'BRA', 'DAY', 'JED', 'SPE_R', 'SPE', 'THETRACK', 'CTHETRACK_reverse_v0', 'icra25_v6', 'DCRL', 'CHN', 'TEST_1', 'GLC_smile_small', 'GLC_pit_rbring1', 'IND', 'SAU', 'SAU_R', 'OVA', 'OVA_R', 'IND_R', 'KEY', 'TR2', 'TR3', 'CRO_R', 'f', 'SPA', 'HOOK_v0','CTHETRACK_v1']
   MAP_NAME_LIST: ['CIR1']
-  # MAP_NAME_LIST: ['BAHRAIN']
-  # MAP_NAME_LIST: ['AUT', 'BAH', 'SPA', 'BRA', 'DAY', 'JED', 'SPE_R', 'SPE', 'CTHETRACK_reverse_v0', 'icra25_v6', 'DCRL', 'CHN', 'TEST_1', 'GLC_smile_small', 'GLC_pit_rbring1', 'IND', 'SAU', 'SAU_R', 'OVA', 'OVA_R', 'IND_R', 'KEY', 'TR2', 'TR3']
+
   RANDOM_SEED: 43
   ORIGIN_LIST: [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]] 
   TRAJ_VISIBLE: False
   BOUNDARY_VISIBLE: True
+  
   # When comparing real data that don't use incremental it must always be set to False
   INCREMENTAL_MODE: True 
-  STEERING_INCREMENTAL_MODE: True 
+
   # When comparing real data set to false, otherwise true
   NON_TRAVERSABLE_TERMINATION: True
   RESET_RANDOM: True
 
-  # Actutators limit2
+  # Actutators limit
   MAX_SPEED_INCREMENT: 0.10 # m/s /dt_decimation
   MAX_STEERING_ANGLE_INCREMENT: 0.10 # rad /dt_decimation
   MAX_SPEED_SCALING: 12
-  MAX_STEERING_SCALING: 0.4
+  MAX_STEERING_ANGLE: 0.4
   SPEED_SIM_TO_REAL_SCALING: 1.0 # due to wheel radius mismatch, scaling = 1 when radius 0.5, but then on real car velocity obs need to be scaled up so that policy is safer
   STEERING_SIM_TO_REAL_SCALING: 1.0 # due to geometric model mismatch
 
@@ -46,7 +46,7 @@ env_config:
   # SIM_DECIMATION: Number of physics steps per simulation step; 
   # The actions, observations, and rewards are computed every SIM_DECIMATION steps, and every SIM_DECIMATION*SIM_DT seconds.
   EPISODE_LENGTH_S_TIMETRIAL: 10
-  EPISODE_LENGTH_S_OVERTAKE: 100
+  EPISODE_LENGTH_S_OVERTAKE: 30
   SIM_DT: 0.005
   SIM_DECIMATION: 5
   # SIM_DT: 0.01
@@ -74,7 +74,7 @@ env_config:
 
   # Min distance allowable to walls (otherwise collision)
   HARD_WALL_COLLISION_RADIUS: 0.18
-  SOFT_WALL_COLLISION_RADIUS: 0.28
+  SOFT_WALL_COLLISION_RADIUS: 0.25
   # Max progress allowable (in idx), otherwise we consider it corner cutting
   MAX_PROGRESS_IDX: 30 
 
@@ -89,27 +89,27 @@ env_config:
   OPP_SIZE_RADIUS: 0.20
   OPP_MOVE_DT: 0.1
   OPP_COLLISION_RADIUS: 0.40
-  OPP_FRONT_COLLISION_RADIUS: 0.55
+  OPP_FRONT_COLLISION_RADIUS: 0.45
   OPP_LAT_COLLISION_RADIUS: 0.30
   CROSS_POS_LIM: 0.15
 
-  OPP_GENERALIZATION: False
+  OPP_GENERALIZATION: True
   OPP_TRAJ: "min_curv"
   OPPONENT_TRAJ_XY_SHIFT_MAX: 0.0
-  OPP_INIT_VEL_SCALING: 0.75
-  OPP_MIN_VEL_SCALING: 0.5
-  OPP_STD_VEL_SCALING: 0.05
+  OPP_INIT_VEL_SCALING: 0.001
+  OPP_MIN_VEL_SCALING: 0.001
+  OPP_STD_VEL_SCALING: 0.5
   OPP_VEL_SCALING_INCREMENT: 0.025
   OPP_VEL_SCALING_DECREASE: 0.000
   OT_COLLISION_RATIO_LVL_UP: 0.51
   OT_COLLISION_RATIO_LVL_DOWN: 0.11
   VEL_SCALING_CHECK_STEPS: 100
   
-  OPPONENT_STARTS_MOVING_AFTER_STEP: 20
+  OPPONENT_STARTS_MOVING_AFTER_STEP: 25
   # OPPONENT_INIT_DISTANCE_IDX: 40
-  OPPONENT_INIT_DISTANCE_IDX_MAX: 41
-  OPPONENT_INIT_DISTANCE_IDX_MIN: 40
-  OPPONENT_FAR_AWAY_IDX: 90
+  OPPONENT_INIT_DISTANCE_IDX_MAX: 50
+  OPPONENT_INIT_DISTANCE_IDX_MIN: 45
+  OPPONENT_FAR_AWAY_IDX: 100
   OPPONENT_OVERTAKEN_IDX: 10
   OPPONENT_ALWAYS_AHEAD_PERCENTAGE: 0.01
 
