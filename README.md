@@ -169,15 +169,16 @@ The addition of this fork have been the new time trial and overtaking.
  
 Before running any training, is it important to check the config file f1tenth_config.yaml (source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/config/f1tenth_config.yaml)
 
-### Training time-trial and overtaking
-
+### Training time-trial
 To run a quick training run (if you don't specify the name it will be save with the timestamp)
 
 ```
 python source/wheeledlab_rl/scripts/train_rl.py -r RSS_TIMETRIAL --headless train.log.run_name=SPECIFY_RUN_NAME
 ```
+NB. that you can also run not headless but for many environments (e.g. 4096) it is suggested headless. Otherwise you need a display (see remote-novnc)
 
-or
+### Training overtaking
+
 
 ```
 python source/wheeledlab_rl/scripts/train_rl.py -r RSS_OVERTAKE --headless train.log.run_name=SPECIFY_RUN_NAME
@@ -190,8 +191,11 @@ The model and logs should be stored in
 source/wheeledlab_rl/logs/
 ```
 
-NB. that you can also run not headless but for many environments (e.g. 4096) it is suggested headless. Otherwise you need a display (see remote-novnc)
+The overtaking task can still be improved. For example it is very sensible to its parameters in the "f1tenth_config.yaml". If after many episodes the agent is still not learning, it might be because the episode terminates too quickly. A solution is to increase "OPPONENT_ALWAYS_AHEAD_PERCENTAGE" that defines the percentage in [-] of opponents that moves in front of the agent (they are always ahead, donkey + carrot scenario). Similarly it is always suggested to start with "OPP_INIT_VEL_SCALING" close to 0. Another solution is to have the opponent static for a initial number of "STATIC_OPPONENT_UNTIL_EP" episodes.
 
+Even when learning, the agent struggle to learn a policy reproducible in the real car, due to its very oscillatory steering (even with action regularization). Furhtermore, it struggles to learn never crashing to the opponent, without exploiting the reward functions (e.g. it might never crash to the opponent, but by learning just to trail behind it without attempting overtaking).
+
+To improve the agent performance, it would be interesting to try add predicted trajectory information (+ with uncertainty/noise) of the opponent trajectory as observation feature, it might help the agent to learn smoother and more decisive trajectories.
 
 ### Playing trained policies
 
@@ -208,4 +212,47 @@ To improve reproducibility and tidiness of the code, the "f1tenth_config.yaml" u
 ### Playing rosbag data in simulation
 
 You can compare real data with simulation (e.g. for system identification).
-N.B. In "f1tenth_config.yaml" the parameters "INCREMENTAL_MODE" and "NON_TRAVERSABLE_TERMINATION" must be set to false! You can also adjust "EPISODE_LENGTH_S_*" accordingly.
+N.B. In "f1tenth_config.yaml" the parameters "INCREMENTAL_MODE" and "NON_TRAVERSABLE_TERMINATION" must be set to false! 
+N.B. You can also adjust "EPISODE_LENGTH_S_*" accordingly.
+
+```
+python source/wheeledlab_rl/scripts/compare_sim_real.py 
+```
+
+### Code parts to improve (1) - Logging and plotting data to "play_policy.py" and "compare_sim_real.py"
+
+In "rewards.py" are stored environment information in the following way
+
+```
+    # ---- extras for play_policy.py / WandB (unchanged behavior) ----
+    env.extras["theta"] = asset.data.heading_w
+    env.extras["pos_xy"] = position_xy_world
+    env.extras["vel_x"] = asset.data.root_lin_vel_b[:, 0]
+    env.extras["vel_y"] = -asset.data.root_lin_vel_b[:, 1]
+    env.extras["target_velocity"] = env._target_velocity_history[:, 0].clone()
+    env.extras["target_steering"] = env._target_steering_angle_history[:, 0].clone()
+    env.extras["yaw_rate"] = asset.data.root_ang_vel_b[:, 2]
+    env.extras["s_idx"] = current_idx.clone()
+    env.extras["time"] = torch.tensor(env.sim.current_time, device=env.device)
+    env.extras["s_idx_max"] = torch.tensor(num_waypoints, device=env.device)
+```
+
+which are used and plotted later in "play_policy.py" and "compare_sim_real.py". 
+Similarly informations are logged to W&B (in "rewards.py" and terminations.py")
+
+```
+    env.extras["log"]["Info/max_slip_angle"] = torch.max(slip_angle * moving_mask)
+    env.extras["log"]["Info/mean_slip_angle"] = torch.mean(slip_angle * moving_mask)
+    env.extras["log"]["Info/mean_speed"] = torch.mean(env._base_lin_vel_x_history)
+    env.extras["log"]["Info/max_speed"] = torch.max(env._base_lin_vel_x_history)
+```
+
+Everytime the function in which they reside is called (every decimation step), these information are stored. But it might easily brake if e.g. the function is not called or called multiple times.
+
+### Code parts to improve (2) - Maps initialization
+
+Overall the initialization of the terrain is quite messy (but works). The part addressed are the initialization of the class "F1TenthOvertakeTerrainImporterCfg" and the functions in "maps_utils.py", where basically the information from the classic map file "global_waypoints.json" are transferred and stored as class variables.
+
+### Code parts to improve (3) - Log f1tenth_config.yaml
+
+To improve reproducibility and tidiness of the code, the "f1tenth_config.yaml" used in each run should be stored in the logs of the training. Much better than writing down run information in the run title.

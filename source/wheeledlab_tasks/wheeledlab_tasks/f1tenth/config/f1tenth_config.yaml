@@ -7,7 +7,7 @@ env_config:
 
   RANDOM_SEED: 43
 
-  # Not clean, but it works for now (every map has the same origin and this simplifies the resets of the cars position in new episodes)
+  # Not clean, but it works for now (every map has the same origin and this simplifies the resets of the cars position in new episodes). To always keep at 0.0, or simply remove origin_list during initialzation
   ORIGIN_LIST: [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]] 
   TRAJ_VISIBLE: False
   BOUNDARY_VISIBLE: True
