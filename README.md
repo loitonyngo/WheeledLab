@@ -162,3 +162,50 @@ Eprint = {arXiv:2502.07380},
 [2] Siddhartha S. Srinivasa, Patrick Lancaster, Johan Michalove, Matt Schmittle, Colin Summers, Matthew Rockett, Rosario Scalise, Joshua R. Smith, Sanjiban Choudhury, Christoforos Mavrogiannis, and Fereshteh Sadeghi.MuSHR: A Low-Cost, Open-Source Robotic Racecar for Education and Research, December 2023.URL http://arxiv.org/abs/1908.08031.arXiv:1908.08031 [cs].
 
 [3] Matthew O’Kelly, Hongrui Zheng, Dhruv Karthik, and Rahul Mangharam. F1TENTH: An Open-source Eval- uation Environment for Continuous Control and Reinforcement Learning. In Proceedings of the NeurIPS 2019 Competition and Demonstration Track, pages 77– 89. PMLR, August 2020. URL https://proceedings.mlr. press/v123/o-kelly20a.html. ISSN: 2640-3498.
+
+## NEW General Workflow F1TENTH Time Trial and Overtaking
+
+The addition of this fork have been the new time trial and overtaking.
+ 
+Before running any training, is it important to check the config file f1tenth_config.yaml (source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/config/f1tenth_config.yaml)
+
+### Training time-trial and overtaking
+
+To run a quick training run (if you don't specify the name it will be save with the timestamp)
+
+```
+python source/wheeledlab_rl/scripts/train_rl.py -r RSS_TIMETRIAL --headless train.log.run_name=SPECIFY_RUN_NAME
+```
+
+or
+
+```
+python source/wheeledlab_rl/scripts/train_rl.py -r RSS_OVERTAKE --headless train.log.run_name=SPECIFY_RUN_NAME
+```
+
+The model and logs should be stored in 
+
+
+```
+source/wheeledlab_rl/logs/
+```
+
+NB. that you can also run not headless but for many environments (e.g. 4096) it is suggested headless. Otherwise you need a display (see remote-novnc)
+
+
+### Playing trained policies
+
+
+Once you are done with training, you can test and play the trained policy via 
+
+```
+python source/wheeledlab_rl/scripts/play_policy.py 
+```
+
+IMPORTANT: when you play a policy, the observation features (horizon length, history buffer length) set in "f1tenth_overtake_env_cfg.py"/"f1tenth_timetrial_env_cfg.py" must be the same of the ones used in training. However you might change other parameters in the "f1tenth_config.yaml" to study how the trained policy perform in a different environment (friction and mass randomization).
+To improve reproducibility and tidiness of the code, the "f1tenth_config.yaml" used in each run should be stored in the logs of the training.
+
+### Playing rosbag data in simulation
+
+You can compare real data with simulation (e.g. for system identification).
+N.B. In "f1tenth_config.yaml" the parameters "INCREMENTAL_MODE" and "NON_TRAVERSABLE_TERMINATION" must be set to false! You can also adjust "EPISODE_LENGTH_S_*" accordingly.
