@@ -165,7 +165,7 @@ Eprint = {arXiv:2502.07380},
 
 ## NEW General Workflow F1TENTH Time Trial and Overtaking
 
-The addition of this fork have been the new time trial and overtaking.
+The addition of this fork have been the new time trial and overtaking. It was built with the intention of being compatible with the maps from the [ForzaETH Race Stack](https://github.com/ForzaETH/race_stack) (i.e. maps information).
  
 Before running any training, is it important to check the config file f1tenth_config.yaml (source/wheeledlab_tasks/wheeledlab_tasks/f1tenth/config/f1tenth_config.yaml)
 
@@ -191,7 +191,8 @@ The model and logs should be stored in
 source/wheeledlab_rl/logs/
 ```
 
-The overtaking task can still be improved. For example it is very sensible to its parameters in the "f1tenth_config.yaml". If after many episodes the agent is still not learning, it might be because the episode terminates too quickly. A solution is to increase "OPPONENT_ALWAYS_AHEAD_PERCENTAGE" that defines the percentage in [-] of opponents that moves in front of the agent (they are always ahead, donkey + carrot scenario). Similarly it is always suggested to start with "OPP_INIT_VEL_SCALING" close to 0. Another solution is to have the opponent static for a initial number of "STATIC_OPPONENT_UNTIL_EP" episodes.
+The overtaking task can still be improved. For example it is very sensible to its parameters in the "f1tenth_config.yaml". If after many episodes the agent is still not learning, it might be because the episode terminates too quickly. A solution is to increase "OPPONENT_ALWAYS_AHEAD_PERCENTAGE" that defines the percentage in [-] of opponents that moves in front of the agent (they are always ahead, donkey + carrot scenario). 
+Similarly it is always suggested to start with "OPP_INIT_VEL_SCALING" close to 0. Another solution is to have the opponent static for a initial number of "STATIC_OPPONENT_UNTIL_EP" episodes.
 
 Even when learning, the agent struggle to learn a policy reproducible in the real car, due to its very oscillatory steering (even with action regularization). Furhtermore, it struggles to learn never crashing to the opponent, without exploiting the reward functions (e.g. it might never crash to the opponent, but by learning just to trail behind it without attempting overtaking).
 
@@ -206,7 +207,8 @@ Once you are done with training, you can test and play the trained policy via
 python source/wheeledlab_rl/scripts/play_policy.py 
 ```
 
-IMPORTANT: when you play a policy, the observation features (horizon length, history buffer length) set in "f1tenth_overtake_env_cfg.py"/"f1tenth_timetrial_env_cfg.py" must be the same of the ones used in training. However you might change other parameters in the "f1tenth_config.yaml" to study how the trained policy perform in a different environment (friction and mass randomization).
+IMPORTANT: when you play a policy, the observation features (horizon length, history buffer length) set in "f1tenth_overtake_env_cfg.py"/"f1tenth_timetrial_env_cfg.py" must be the same of the ones used in training. 
+However you might change other parameters in the "f1tenth_config.yaml" to study how the trained policy perform in a different environment (friction and mass randomization).
 To improve reproducibility and tidiness of the code, the "f1tenth_config.yaml" used in each run should be stored in the logs of the training.
 
 ### Playing rosbag data in simulation
